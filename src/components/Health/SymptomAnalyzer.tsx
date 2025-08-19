@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
+import { getHealthTip } from '../../lib/ai';
 import { 
   Stethoscope, AlertTriangle, Brain, Thermometer, 
   Heart, Activity, Clock, X, Send, Loader
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
+
+const ENABLE_AI = import.meta.env.VITE_ENABLE_AI === 'true';
 
 interface SymptomAnalyzerProps {
   petId: string;
@@ -69,26 +72,37 @@ const SymptomAnalyzer: React.FC<SymptomAnalyzerProps> = ({
     setAnalyzing(true);
 
     try {
-      // Call AI analysis edge function
-      const { data, error } = await supabase.functions.invoke('analyze-symptoms', {
-        body: {
-          pet_id: petId,
-          pet_name: petName,
-          pet_species: petSpecies,
-          symptoms: symptomData.symptoms,
-          duration: symptomData.duration,
-          severity: symptomData.severity,
-          appetite: symptomData.appetite,
-          energy: symptomData.energy,
-          behavior_changes: symptomData.behavior_changes,
-          additional_notes: symptomData.additional_notes
-        }
-      });
+      let analysisData;
 
-      if (error) {
-        console.error('Error analyzing symptoms:', error);
-        toast.error('Failed to analyze symptoms');
-        return;
+      if (ENABLE_AI) {
+        // Use OpenAI for real analysis
+        const symptomsText = `${petSpecies} named ${petName} showing: ${symptomData.symptoms.join(', ')}. Duration: ${symptomData.duration}. Severity: ${symptomData.severity}. Additional notes: ${symptomData.additional_notes}`;
+        const aiTip = await getHealthTip(symptomsText);
+        
+        analysisData = {
+          analysis_type: 'ai_generated',
+          urgency_level: symptomData.severity === 'severe' ? 'high' : symptomData.severity === 'moderate' ? 'medium' : 'low',
+          recommendations: [aiTip || 'Monitor your pet and consult a veterinarian if symptoms persist'],
+          when_to_see_vet: symptomData.severity === 'severe' 
+            ? 'Seek immediate veterinary attention'
+            : 'Monitor for 24-48 hours, contact vet if symptoms worsen',
+          disclaimer: 'This AI analysis is for informational purposes only. Always consult with a qualified veterinarian.',
+          generated_at: new Date().toISOString()
+        };
+      } else {
+        // Mock analysis for demo
+        analysisData = {
+          analysis_type: 'mock',
+          urgency_level: symptomData.severity === 'severe' ? 'high' : symptomData.severity === 'moderate' ? 'medium' : 'low',
+          recommendations: [
+            'Monitor your pet closely for any changes',
+            'Ensure your pet stays hydrated',
+            'Contact your veterinarian if symptoms worsen'
+          ],
+          when_to_see_vet: 'Schedule a veterinary appointment to discuss these symptoms',
+          disclaimer: 'This is a demo analysis. Always consult with a qualified veterinarian.',
+          generated_at: new Date().toISOString()
+        };
       }
 
       // Save analysis to health records
@@ -100,7 +114,7 @@ const SymptomAnalyzer: React.FC<SymptomAnalyzerProps> = ({
           title: `Symptom Analysis - ${new Date().toLocaleDateString()}`,
           description: `Symptoms: ${symptomData.symptoms.join(', ')}`,
           date: new Date().toISOString().split('T')[0],
-          symptom_analysis: data
+          symptom_analysis: analysisData
         });
 
       if (recordError) {
@@ -109,12 +123,12 @@ const SymptomAnalyzer: React.FC<SymptomAnalyzerProps> = ({
         return;
       }
 
-      toast.success('Symptom analysis completed and saved!');
+      toast.success(ENABLE_AI ? 'AI analysis completed and saved!' : 'Symptom analysis saved!');
       setIsOpen(false);
       resetForm();
       
       if (onAnalysisComplete) {
-        onAnalysisComplete(data);
+        onAnalysisComplete(analysisData);
       }
     } catch (error) {
       console.error('Error analyzing symptoms:', error);
@@ -345,7 +359,7 @@ const SymptomAnalyzer: React.FC<SymptomAnalyzerProps> = ({
                       ) : (
                         <>
                           <Brain className="h-4 w-4" />
-                          <span>Analyze Symptoms</span>
+                          <span>{ENABLE_AI ? 'AI Analyze' : 'Analyze Symptoms'}</span>
                         </>
                       )}
                     </button>

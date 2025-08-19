@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../lib/auth';
 import { supabase, uploadFile } from '../lib/supabase';
+import { startCheckout } from '../lib/payments';
 import { 
   Heart, Plus, Search, Filter, DollarSign, Target, 
   Calendar, MapPin, Users, Star, Gift, Upload,
@@ -9,6 +10,8 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import ConfirmDialog from '../components/UI/ConfirmDialog';
+
+const ENABLE_PAYMENTS = import.meta.env.VITE_ENABLE_PAYMENTS === 'true';
 
 interface Cause {
   id: string;
@@ -291,42 +294,55 @@ const Donations: React.FC = () => {
     setSubmittingDonation(true);
 
     try {
-      // Create donation record
-      const { error: donationError } = await supabase
-        .from('donations')
-        .insert({
-          cause_id: selectedCause.id,
-          donor_id: profile.id,
-          amount,
-          donor_name: donationData.is_anonymous ? null : (donationData.donor_name.trim() || profile.display_name),
-          message: donationData.message.trim() || null,
-          is_anonymous: donationData.is_anonymous
-        });
+      if (ENABLE_PAYMENTS) {
+        // Use Stripe for real payments
+        const demoPriceId = `price_demo_${Math.floor(amount * 100)}`;
+        await startCheckout(
+          demoPriceId,
+          `${window.location.origin}/donations?success=true&cause=${selectedCause.id}&amount=${amount}`,
+          `${window.location.origin}/donations?canceled=true`
+        );
+      } else {
+        // Simulate donation for demo
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        // Create donation record
+        const { error: donationError } = await supabase
+          .from('donations')
+          .insert({
+            cause_id: selectedCause.id,
+            donor_id: profile.id,
+            amount,
+            donor_name: donationData.is_anonymous ? null : (donationData.donor_name.trim() || profile.display_name),
+            message: donationData.message.trim() || null,
+            is_anonymous: donationData.is_anonymous
+          });
 
-      if (donationError) {
-        toast.error('Failed to process donation');
-        console.error('Error creating donation:', donationError);
-        setSubmittingDonation(false);
-        return;
+        if (donationError) {
+          toast.error('Failed to process donation');
+          console.error('Error creating donation:', donationError);
+          setSubmittingDonation(false);
+          return;
+        }
+
+        // Update cause raised amount
+        const { error: updateError } = await supabase
+          .from('causes')
+          .update({ 
+            raised_amount: selectedCause.raised_amount + amount,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', selectedCause.id);
+
+        if (updateError) {
+          console.error('Error updating cause amount:', updateError);
+        }
+
+        toast.success(`Thank you for your $${amount} donation!`);
+        setShowDonateModal(false);
+        resetDonationForm();
+        loadData();
       }
-
-      // Update cause raised amount
-      const { error: updateError } = await supabase
-        .from('causes')
-        .update({ 
-          raised_amount: selectedCause.raised_amount + amount,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', selectedCause.id);
-
-      if (updateError) {
-        console.error('Error updating cause amount:', updateError);
-      }
-
-      toast.success(`Thank you for your $${amount} donation!`);
-      setShowDonateModal(false);
-      resetDonationForm();
-      loadData();
     } catch (error) {
       console.error('Error processing donation:', error);
       toast.error('Something went wrong');
@@ -582,9 +598,15 @@ const Donations: React.FC = () => {
                       <button
                         onClick={() => openDonateModal(cause)}
                         disabled={isExpired}
-                        className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+                        className={`w-full px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                          isExpired 
+                            ? 'bg-gray-400 text-white cursor-not-allowed'
+                            : ENABLE_PAYMENTS
+                              ? 'bg-green-600 text-white hover:bg-green-700'
+                              : 'bg-blue-600 text-white hover:bg-blue-700'
+                        }`}
                       >
-                        {isExpired ? 'Campaign Ended' : 'Donate Now'}
+                        {isExpired ? 'Campaign Ended' : ENABLE_PAYMENTS ? 'Donate Now' : 'Demo Donation'}
                       </button>
                     </div>
                   </motion.div>

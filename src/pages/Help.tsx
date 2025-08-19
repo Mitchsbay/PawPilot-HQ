@@ -1,13 +1,19 @@
 import React, { useState } from 'react';
 import { useAuth } from '../lib/auth';
+import { getHealthTip } from '../lib/ai';
+import { startCheckout } from '../lib/payments';
 import { 
   HelpCircle, Shield, MessageCircle, Mail, Phone, 
   Book, AlertTriangle, Flag, Lock, Eye, Users,
   ChevronRight, ChevronDown, Search, ExternalLink,
-  FileText, Video, Headphones, Clock, CheckCircle
+  FileText, Video, Headphones, Clock, CheckCircle,
+  Brain, CreditCard, Zap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
+
+const ENABLE_AI = import.meta.env.VITE_ENABLE_AI === 'true';
+const ENABLE_PAYMENTS = import.meta.env.VITE_ENABLE_PAYMENTS === 'true';
 
 interface FAQItem {
   id: string;
@@ -34,6 +40,15 @@ const HelpPage: React.FC = () => {
   const [showContactForm, setShowContactForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // AI Demo
+  const [aiSymptoms, setAiSymptoms] = useState('');
+  const [aiTip, setAiTip] = useState('');
+  const [loadingAI, setLoadingAI] = useState(false);
+
+  // Payments Demo
+  const [donationAmount, setDonationAmount] = useState('10');
+  const [processingPayment, setProcessingPayment] = useState(false);
+
   // Contact form
   const [contactData, setContactData] = useState({
     subject: '',
@@ -41,6 +56,48 @@ const HelpPage: React.FC = () => {
     category: 'general',
     priority: 'medium' as 'low' | 'medium' | 'high'
   });
+
+  const handleAIDemo = async () => {
+    if (!aiSymptoms.trim()) {
+      toast.error('Please enter some symptoms');
+      return;
+    }
+
+    setLoadingAI(true);
+    try {
+      const tip = await getHealthTip(aiSymptoms);
+      setAiTip(tip);
+      if (tip) {
+        toast.success('AI health tip generated!');
+      } else {
+        toast.error('Failed to generate health tip');
+      }
+    } catch (error) {
+      console.error('AI demo error:', error);
+      toast.error('AI service unavailable');
+    } finally {
+      setLoadingAI(false);
+    }
+  };
+
+  const handlePaymentDemo = async () => {
+    const amount = parseFloat(donationAmount);
+    if (!amount || amount < 1) {
+      toast.error('Please enter a valid amount');
+      return;
+    }
+
+    setProcessingPayment(true);
+    try {
+      // Demo price ID - in production this would be a real Stripe price
+      const demoPriceId = 'price_demo_' + Math.floor(amount * 100);
+      await startCheckout(demoPriceId);
+    } catch (error) {
+      console.error('Payment demo error:', error);
+      toast.error('Payment service unavailable');
+      setProcessingPayment(false);
+    }
+  };
 
   const faqData: FAQItem[] = [
     {
@@ -314,6 +371,108 @@ const HelpPage: React.FC = () => {
       {/* Contact Tab */}
       {activeTab === 'contact' && (
         <div className="max-w-4xl mx-auto">
+          {/* Feature Demos */}
+          {(ENABLE_AI || ENABLE_PAYMENTS) && (
+            <div className="mb-8">
+              <h2 className="text-2xl font-bold text-gray-900 mb-6">Feature Demos</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* AI Demo */}
+                {ENABLE_AI && (
+                  <div className="bg-white rounded-lg shadow-md p-6">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="p-2 bg-purple-100 rounded-lg">
+                        <Brain className="h-5 w-5 text-purple-600" />
+                      </div>
+                      <h3 className="text-lg font-semibold text-gray-900">AI Health Tips</h3>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Get AI-powered health tips for your pet's symptoms
+                    </p>
+                    <div className="space-y-3">
+                      <input
+                        type="text"
+                        value={aiSymptoms}
+                        onChange={(e) => setAiSymptoms(e.target.value)}
+                        placeholder="Enter pet symptoms..."
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      />
+                      <button
+                        onClick={handleAIDemo}
+                        disabled={loadingAI || !aiSymptoms.trim()}
+                        className="w-full bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center space-x-2"
+                      >
+                        {loadingAI ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                            <span>Analyzing...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Zap className="h-4 w-4" />
+                            <span>Get AI Tip</span>
+                          </>
+                        )}
+                      </button>
+                      {aiTip && (
+                        <div className="mt-3 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                          <p className="text-sm text-purple-800">{aiTip}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Payments Demo */}
+                {ENABLE_PAYMENTS && (
+                  <div className="bg-white rounded-lg shadow-md p-6">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="p-2 bg-green-100 rounded-lg">
+                        <CreditCard className="h-5 w-5 text-green-600" />
+                      </div>
+                      <h3 className="text-lg font-semibold text-gray-900">Donation Demo</h3>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Test the Stripe payment integration
+                    </p>
+                    <div className="space-y-3">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-lg">$</span>
+                        <input
+                          type="number"
+                          min="1"
+                          step="0.01"
+                          value={donationAmount}
+                          onChange={(e) => setDonationAmount(e.target.value)}
+                          className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                        />
+                      </div>
+                      <button
+                        onClick={handlePaymentDemo}
+                        disabled={processingPayment}
+                        className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center space-x-2"
+                      >
+                        {processingPayment ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                            <span>Processing...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CreditCard className="h-4 w-4" />
+                            <span>Demo Donation</span>
+                          </>
+                        )}
+                      </button>
+                      <p className="text-xs text-gray-500 text-center">
+                        Demo mode - no actual charges
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* Contact Options */}
             <div className="space-y-6">
