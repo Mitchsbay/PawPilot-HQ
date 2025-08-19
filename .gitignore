@@ -10,11 +10,17 @@ yarn-error.log*
 .env.development.local
 .env.test.local
 .env.production.local
+# Always keep the example env in git
+!.env.example
 
 # Build outputs
 dist/
 build/
 *.tsbuildinfo
+
+# Vercel & Vite caches
+.vercel/
+.vite/
 
 # IDE files
 .vscode/
