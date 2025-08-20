@@ -1,31 +1,62 @@
-import { supabase } from "@/lib/supabase"; // if the @ alias doesn't work, use: ../lib/supabase
+// src/lib/profile.ts
+import { supabase } from "@/lib/supabase";
+import { useEffect } from "react";
 
-export async function loadOrCreateProfile() {
-  const { data: { user }, error: userErr } = await supabase.auth.getUser();
-  if (userErr || !user) throw userErr ?? new Error("No user session");
+export type Profile = {
+  id: string;
+  // add any optional columns you actually have:
+  // username?: string | null;
+  // full_name?: string | null;
+  // avatar_url?: string | null;
+};
 
-  const userId = user.id;
+export async function getProfile(userId: string) {
+  // Returns { data: null, error: null } if it doesn’t exist yet.
+  return supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
+}
 
-  // Try to read; returns null if not found
-  const { data: profile, error: selErr } = await supabase
+export async function ensureProfile(userId: string) {
+  // 1) Try to find it
+  const { data, error } = await supabase
     .from("profiles")
-    .select("*")
+    .select("id")
     .eq("id", userId)
     .maybeSingle();
 
-  if (selErr && selErr.code !== "PGRST116") {
-    throw selErr; // real error (e.g., RLS)
-  }
+  if (error && (error as any).code !== "PGRST116") throw error;
+  if (data) return data; // already exists
 
-  if (profile) return profile;
-
-  // Create if missing
-  const { data: created, error: insErr } = await supabase
+  // 2) Create it if missing (handle unique conflict 23505 safely)
+  const { error: insertErr } = await supabase
     .from("profiles")
-    .insert({ id: userId }) // add required defaults if your schema needs them
-    .select()
+    .insert({ id: userId })
     .single();
 
-  if (insErr) throw insErr;
-  return created;
+  if (insertErr && insertErr.code !== "23505") throw insertErr;
+  return { id: userId };
+}
+
+/** Call this once (e.g. in App) so the user’s profile is created on sign-in. */
+export function useEnsureProfile() {
+  useEffect(() => {
+    let active = true;
+
+    // On initial load
+    supabase.auth.getUser().then(({ data, error }) => {
+      const user = data?.user;
+      if (!error && active && user) ensureProfile(user.id);
+    });
+
+    // On future auth changes
+    const { data: sub } = supabase.auth.onAuthStateChange((evt, session) => {
+      if (evt === "SIGNED_IN" && session?.user) {
+        ensureProfile(session.user.id);
+      }
+    });
+
+    return () => {
+      active = false;
+      sub.subscription.unsubscribe();
+    };
+  }, []);
 }
