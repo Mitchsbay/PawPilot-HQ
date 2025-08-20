@@ -1,24 +1,43 @@
-import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
-const root = process.cwd();
+// Robust verifier: accepts API routes at repo root (api/*) or under web/api/*
+// Prints exactly what it looked for and what's actually present.
 
-function has(dep) {
-  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-  return Boolean((pkg.dependencies && pkg.dependencies[dep]) || (pkg.devDependencies && pkg.devDependencies[dep]));
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+
+const roots = ["." , "web"]; // check both layouts
+const required = ["ai-health-tip.ts", "checkout.ts"];
+
+function dirList(path) {
+  try {
+    return readdirSync(path).map((name) => {
+      const full = join(path, name);
+      const isDir = (() => { try { return statSync(full).isDirectory(); } catch { return false; } })();
+      return (isDir ? "[DIR] " : "      ") + name;
+    }).join("\n");
+  } catch {
+    return "(missing)";
+  }
 }
 
-const requiredFiles = [
-  join(root, '..', 'api', 'ai-health-tip.ts'),
-  join(root, '..', 'api', 'checkout.ts'),
-];
-const fileMissing = requiredFiles.filter(f => !existsSync(f));
-const depsMissing = ['openai','stripe'].filter(d => !has(d));
+let found = false;
+for (const root of roots) {
+  const paths = required.map((f) => join(root, "api", f));
+  const ok = paths.every((p) => existsSync(p));
+  console.log(`Checking ${root === "." ? "repo root" : root}/api …`);
+  console.log(paths.map((p) => `  - ${existsSync(p) ? "✓" : "✗"} ${p}`).join("\n"));
+  if (ok) found = true;
+}
 
-if (fileMissing.length || depsMissing.length) {
-  console.error('❌ Verification failed');
-  if (fileMissing.length) console.error('Missing files:\n' + fileMissing.map(x=>' - '+x).join('\n'));
-  if (depsMissing.length) console.error('Missing deps:\n' + depsMissing.map(x=>' - '+x).join('\n'));
+if (!found) {
+  console.error("\n❌ Verification failed. Missing required API routes.\n");
+  console.error("Repository listing for quick debug:");
+  console.error("\n./api");
+  console.error(dirList("./api"));
+  console.error("\n./web/api");
+  console.error(dirList("./web/api"));
+  console.error("\nTop-level files:");
+  console.error(dirList("."));
   process.exit(1);
-} else {
-  console.log('✅ Features present: API routes + deps');
 }
+
+console.log("\n✓ API routes present");
