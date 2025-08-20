@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './lib/auth';
+import { useEnsureProfile } from './lib/profile'; // ✅ NEW: ensure user profile exists
 import ToastProvider from './components/Toast/ToastProvider';
 import Header from './components/Layout/Header';
 import Footer from './components/Layout/Footer';
@@ -38,7 +39,11 @@ import Billing from './features/payments/Billing';
 // Protected Route component
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuth();
-  
+
+  // ✅ NEW: make sure a profile row exists once the user is authenticated
+  // (the hook should be safe to call even while loading/no session; it will no-op)
+  useEnsureProfile();
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -46,18 +51,18 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
       </div>
     );
   }
-  
+
   if (!user) {
     return <Navigate to="/auth/login" />;
   }
-  
+
   return <>{children}</>;
 };
 
 // Public Route component (redirect if authenticated)
 const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, loading } = useAuth();
-  
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -65,11 +70,11 @@ const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       </div>
     );
   }
-  
+
   if (user) {
     return <Navigate to="/dashboard" />;
   }
-  
+
   return <>{children}</>;
 };
 
@@ -113,8 +118,8 @@ function AppContent() {
           {/* Protected Routes */}
           <Route path="/onboarding" element={<ProtectedRoute><Onboarding /></ProtectedRoute>} />
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          
-          {/* Main App Routes - Placeholders for now */}
+
+          {/* Main App Routes */}
           <Route path="/pets" element={<ProtectedRoute><Pets /></ProtectedRoute>} />
           <Route path="/health" element={<ProtectedRoute><Health /></ProtectedRoute>} />
           <Route path="/photos" element={<ProtectedRoute><Photos /></ProtectedRoute>} />
