@@ -26,17 +26,26 @@ jobs:
       - name: Show repo tree (debug)
         run: |
           pwd
-          ls -la
+          echo "=== git ls-files ==="
+          git ls-files | sed -n '1,200p'
           echo "--- api ---"
           ls -la api || true
+          echo "--- web/api ---"
+          ls -la web/api || true
           echo "--- scripts ---"
           ls -la scripts || true
 
-      - name: Verify features
+      - name: Verify features (accept root or web/)
         run: npm run -s verify:features
 
       - name: Typecheck
         run: npm run -s typecheck || true
 
-      - name: Build
+      - name: Build (root)
         run: npm run -s build
+        if: ${{ !hashFiles('web/package.json') }}
+
+      - name: Build (web/)
+        working-directory: web
+        run: npm run -s build
+        if: ${{ hashFiles('web/package.json') }}
