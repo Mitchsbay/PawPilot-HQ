@@ -1,4 +1,4 @@
-# PawPilot HQ - The Social Platform for Pet Lovers
+﻿# PawPilot HQ - The Social Platform for Pet Lovers
 
 A comprehensive social platform built for pet owners to connect, share, and care for their beloved companions.
 
@@ -70,7 +70,7 @@ A comprehensive social platform built for pet owners to connect, share, and care
 - **Feature Flags**: Controlled rollout system
 - **Offline Support**: Queue actions when offline
 
-## 📋 Prerequisites
+## ?? Prerequisites
 
 - Node.js 18+ and npm
 - A Supabase account and project
@@ -318,3 +318,5 @@ For support, please visit the Help & Safety section in the application or contac
 ---
 
 **Made with 🐾 by PawPilot HQ Team**
+
+
