@@ -20,7 +20,10 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Show repo tree for debugging
+      - name: Install deps (no audit/fund noise)
+        run: npm install --no-audit --no-fund
+
+      - name: Show repo tree (debug)
         run: |
           pwd
           ls -la
@@ -29,12 +32,8 @@ jobs:
           echo "--- scripts ---"
           ls -la scripts || true
 
-      - name: Install deps
-        run: npm ci
-
-      # Verify the API routes exist (accepts root or web/ layout)
       - name: Verify features
-        run: node ./scripts/verify-features.mjs
+        run: npm run -s verify:features
 
       - name: Typecheck
         run: npm run -s typecheck || true
