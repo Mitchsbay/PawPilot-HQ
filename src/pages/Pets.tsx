@@ -2,11 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { supabase, Pet, uploadFile } from '../lib/supabase';
-import PetCard from '../components/Pets/PetCard';
-import { Heart, Plus, Edit, Trash2, Calendar, Weight, Palette, Upload, X, Check } from 'lucide-react';
+import { 
+  Heart, Plus, Edit, Trash2, Upload, X, Check, 
+  Camera, User, Calendar, Weight, Palette
+} from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import ConfirmDialog from '../components/UI/ConfirmDialog';
+import PetCard from '../components/Pets/PetCard';
 
 const Pets: React.FC = () => {
   const { profile } = useAuth();
@@ -58,8 +61,8 @@ const Pets: React.FC = () => {
         .order('created_at', { ascending: false });
 
       if (error) {
-        toast.error('Failed to load pets');
         console.error('Error loading pets:', error);
+        toast.error('Failed to load pets');
       } else {
         setPets(data || []);
       }
@@ -117,7 +120,7 @@ const Pets: React.FC = () => {
     try {
       let photoUrl = editingPet?.photo_url || null;
 
-      // Upload new photo if provided
+      // Upload photo if provided
       if (photoFile) {
         const filename = `pet_${Date.now()}.${photoFile.name.split('.').pop()}`;
         photoUrl = await uploadFile('petPhotos', filename, photoFile);
@@ -135,11 +138,11 @@ const Pets: React.FC = () => {
         species: formData.species,
         breed: formData.breed.trim() || null,
         date_of_birth: formData.date_of_birth || null,
-        gender: formData.gender.trim() || null,
+        gender: formData.gender || null,
         weight: formData.weight ? parseFloat(formData.weight) : null,
         color: formData.color.trim() || null,
-        bio: formData.bio.trim() || null,
         photo_url: photoUrl,
+        bio: formData.bio.trim() || null,
         visibility: formData.visibility,
         is_lost: false
       };
@@ -155,7 +158,7 @@ const Pets: React.FC = () => {
           toast.error('Failed to update pet');
           console.error('Error updating pet:', error);
         } else {
-          toast.success(`${formData.name} updated successfully!`);
+          toast.success('Pet updated successfully!');
           setShowAddModal(false);
           resetForm();
           loadPets();
@@ -170,7 +173,7 @@ const Pets: React.FC = () => {
           toast.error('Failed to add pet');
           console.error('Error adding pet:', error);
         } else {
-          toast.success(`${formData.name} added successfully!`);
+          toast.success('Pet added successfully!');
           setShowAddModal(false);
           resetForm();
           loadPets();
@@ -214,7 +217,7 @@ const Pets: React.FC = () => {
         toast.error('Failed to delete pet');
         console.error('Error deleting pet:', error);
       } else {
-        toast.success(`${deletingPet.name} deleted successfully`);
+        toast.success('Pet deleted successfully');
         loadPets();
       }
     } catch (error) {
@@ -225,24 +228,6 @@ const Pets: React.FC = () => {
     }
   };
 
-  const calculateAge = (dateOfBirth: string) => {
-    const birth = new Date(dateOfBirth);
-    const today = new Date();
-    const ageInMonths = (today.getFullYear() - birth.getFullYear()) * 12 + (today.getMonth() - birth.getMonth());
-    
-    if (ageInMonths < 12) {
-      return `${ageInMonths} month${ageInMonths !== 1 ? 's' : ''} old`;
-    } else {
-      const years = Math.floor(ageInMonths / 12);
-      const months = ageInMonths % 12;
-      if (months === 0) {
-        return `${years} year${years !== 1 ? 's' : ''} old`;
-      } else {
-        return `${years}y ${months}m old`;
-      }
-    }
-  };
-
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -250,7 +235,7 @@ const Pets: React.FC = () => {
           <div className="h-8 bg-gray-200 rounded w-1/3"></div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[...Array(6)].map((_, i) => (
-              <div key={i} className="h-80 bg-gray-200 rounded-lg"></div>
+              <div key={i} className="h-64 bg-gray-200 rounded-lg"></div>
             ))}
           </div>
         </div>
@@ -261,14 +246,14 @@ const Pets: React.FC = () => {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">My Pets</h1>
           <p className="text-gray-600 mt-2">Manage your beloved companions</p>
         </div>
         <button
           onClick={() => setShowAddModal(true)}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
+          className="mt-4 sm:mt-0 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
         >
           <Plus className="h-4 w-4" />
           <span>Add Pet</span>
@@ -276,21 +261,15 @@ const Pets: React.FC = () => {
       </div>
 
       {/* Pets Grid */}
-      {pets.length > 0 ? (
+      {Array.isArray(pets) && pets.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {Array.isArray(pets) && pets.map((pet, index) => (
-            <motion.div
+          {pets.map((pet, index) => (
+            <PetCard
               key={pet.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.1 }}
-            >
-              <PetCard
-                pet={pet}
-                onEdit={() => handleEdit(pet)}
-                onDelete={() => setDeletingPet(pet)}
-              />
-            </motion.div>
+              pet={pet}
+              onEdit={() => handleEdit(pet)}
+              onDelete={() => setDeletingPet(pet)}
+            />
           ))}
         </div>
       ) : (
