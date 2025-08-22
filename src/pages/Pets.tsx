@@ -2,11 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { supabase, Pet, uploadFile } from '../lib/supabase';
+import PetCard from '../components/Pets/PetCard';
 import { Heart, Plus, Edit, Trash2, Calendar, Weight, Palette, Upload, X, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import ConfirmDialog from '../components/UI/ConfirmDialog';
-import PetCard from '../components/Pets/PetCard'; // ✅ ensure PetCard is imported
 
 const Pets: React.FC = () => {
   const { profile } = useAuth();
@@ -34,10 +34,9 @@ const Pets: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    // load when we have either a profile or a session; profile is used for UI, but
-    // the DB rules key off auth.user.id (JWT sub)
-    loadPets();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (profile) {
+      loadPets();
+    }
   }, [profile]);
 
   useEffect(() => {
@@ -49,31 +48,23 @@ const Pets: React.FC = () => {
   }, [searchParams, setSearchParams]);
 
   const loadPets = async () => {
-    setLoading(true);
-    try {
-      // ✅ Always use the authenticated user's id for RLS (auth.uid())
-      const { data: { user }, error: userErr } = await supabase.auth.getUser();
-      if (userErr) throw userErr;
-      if (!user) {
-        setPets([]);
-        setLoading(false);
-        return;
-      }
+    if (!profile) return;
 
+    try {
       const { data, error } = await supabase
         .from('pets')
         .select('*')
-        .eq('owner_id', user.id) // ✅ matches RLS policies using auth.uid()
+        .eq('owner_id', profile.id)
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('Error loading pets:', error);
         toast.error('Failed to load pets');
+        console.error('Error loading pets:', error);
       } else {
         setPets(data || []);
       }
     } catch (error) {
-      console.error('Error loading pets (unexpected):', error);
+      console.error('Error loading pets:', error);
       toast.error('Failed to load pets');
     } finally {
       setLoading(false);
@@ -104,6 +95,7 @@ const Pets: React.FC = () => {
         toast.error('Photo must be less than 5MB');
         return;
       }
+      
       setPhotoFile(file);
       const reader = new FileReader();
       reader.onload = (e) => setPhotoPreview(e.target?.result as string);
@@ -113,13 +105,7 @@ const Pets: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    // ✅ Use the authenticated user ID for inserts/updates to satisfy RLS
-    const { data: { user }, error: userErr } = await supabase.auth.getUser();
-    if (userErr || !user) {
-      toast.error('You must be signed in.');
-      return;
-    }
+    if (!profile) return;
 
     if (!formData.name.trim()) {
       toast.error('Pet name is required');
@@ -135,7 +121,7 @@ const Pets: React.FC = () => {
       if (photoFile) {
         const filename = `pet_${Date.now()}.${photoFile.name.split('.').pop()}`;
         photoUrl = await uploadFile('petPhotos', filename, photoFile);
-
+        
         if (!photoUrl) {
           toast.error('Failed to upload photo');
           setSubmitting(false);
@@ -144,7 +130,7 @@ const Pets: React.FC = () => {
       }
 
       const petData = {
-        owner_id: user.id, // ✅ critical for RLS
+        owner_id: profile.id,
         name: formData.name.trim(),
         species: formData.species,
         breed: formData.breed.trim() || null,
@@ -159,14 +145,15 @@ const Pets: React.FC = () => {
       };
 
       if (editingPet) {
+        // Update existing pet
         const { error } = await supabase
           .from('pets')
           .update(petData)
           .eq('id', editingPet.id);
 
         if (error) {
-          console.error('Error updating pet:', error);
           toast.error('Failed to update pet');
+          console.error('Error updating pet:', error);
         } else {
           toast.success(`${formData.name} updated successfully!`);
           setShowAddModal(false);
@@ -174,13 +161,14 @@ const Pets: React.FC = () => {
           loadPets();
         }
       } else {
+        // Create new pet
         const { error } = await supabase
           .from('pets')
           .insert(petData);
 
         if (error) {
-          console.error('Error adding pet:', error);
           toast.error('Failed to add pet');
+          console.error('Error adding pet:', error);
         } else {
           toast.success(`${formData.name} added successfully!`);
           setShowAddModal(false);
@@ -223,8 +211,8 @@ const Pets: React.FC = () => {
         .eq('id', deletingPet.id);
 
       if (error) {
-        console.error('Error deleting pet:', error);
         toast.error('Failed to delete pet');
+        console.error('Error deleting pet:', error);
       } else {
         toast.success(`${deletingPet.name} deleted successfully`);
         loadPets();
@@ -241,7 +229,7 @@ const Pets: React.FC = () => {
     const birth = new Date(dateOfBirth);
     const today = new Date();
     const ageInMonths = (today.getFullYear() - birth.getFullYear()) * 12 + (today.getMonth() - birth.getMonth());
-
+    
     if (ageInMonths < 12) {
       return `${ageInMonths} month${ageInMonths !== 1 ? 's' : ''} old`;
     } else {
@@ -290,7 +278,7 @@ const Pets: React.FC = () => {
       {/* Pets Grid */}
       {pets.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {pets.map((pet, index) => (
+          {Array.isArray(pets) && pets.map((pet, index) => (
             <motion.div
               key={pet.id}
               initial={{ opacity: 0, y: 20 }}
