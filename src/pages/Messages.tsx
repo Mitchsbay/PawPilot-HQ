@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
+import { isInThread } from '../lib/membership';
 import { 
   MessageCircle, Plus, Search, Phone, Video, MoreHorizontal,
   Send, Paperclip, Smile, User, Users, Settings, X, Image
@@ -138,7 +139,7 @@ const Messages: React.FC = () => {
     if (!profile) return;
 
     try {
-      // First, get thread participants for current user
+      // Load threads where user is a participant
       const { data: participantData, error: participantError } = await supabase
         .from('thread_participants')
         .select('thread_id')
@@ -146,7 +147,6 @@ const Messages: React.FC = () => {
 
       if (participantError) {
         console.error('Error loading thread participants:', participantError);
-        toast.error('Failed to load conversations');
         setThreads([]);
         setLoading(false);
         return;
@@ -160,7 +160,7 @@ const Messages: React.FC = () => {
         return;
       }
 
-      // Load thread details separately to avoid infinite recursion
+      // Load thread details
       const { data: threadsData, error: threadsError } = await supabase
         .from('threads')
         .select('*')
@@ -169,14 +169,12 @@ const Messages: React.FC = () => {
 
       if (threadsError) {
         console.error('Error loading threads:', threadsError);
-        toast.error('Failed to load conversations');
         setThreads([]);
       } else {
         setThreads(threadsData || []);
       }
     } catch (error) {
       console.error('Error loading threads:', error);
-      toast.error('Failed to load conversations');
       setThreads([]);
     } finally {
       setLoading(false);
