@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { supabase, uploadFile } from '../lib/supabase';
 import { getMyGroupRole } from '../lib/membership';
+import { getMyGroupRole } from '../lib/membership';
 import { 
   Users, Plus, Search, Settings, Crown, UserPlus, 
   MessageCircle, Calendar, Image, MoreHorizontal,
