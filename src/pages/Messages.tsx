@@ -138,78 +138,46 @@ const Messages: React.FC = () => {
     if (!profile) return;
 
     try {
-      const { data, error } = await supabase
+      // First, get thread participants for current user
+      const { data: participantData, error: participantError } = await supabase
         .from('thread_participants')
-        .select(`
-          thread_id,
-          threads!inner(
-            id,
-            name,
-            is_group,
-            created_by,
-            created_at,
-            updated_at
-          )
-        `)
+        .select('thread_id')
         .eq('user_id', profile.id);
 
-      if (error) {
-        console.error('Error loading threads:', error);
+      if (participantError) {
+        console.error('Error loading thread participants:', participantError);
         toast.error('Failed to load conversations');
+        setThreads([]);
+        setLoading(false);
+        return;
+      }
+
+      const threadIds = participantData?.map(tp => tp.thread_id) || [];
+      
+      if (threadIds.length === 0) {
+        setThreads([]);
+        setLoading(false);
+        return;
+      }
+
+      // Load thread details separately to avoid infinite recursion
+      const { data: threadsData, error: threadsError } = await supabase
+        .from('threads')
+        .select('*')
+        .in('id', threadIds)
+        .order('updated_at', { ascending: false });
+
+      if (threadsError) {
+        console.error('Error loading threads:', threadsError);
+        toast.error('Failed to load conversations');
+        setThreads([]);
       } else {
-        const threadIds = data?.map(tp => tp.thread_id) || [];
-        
-        if (threadIds.length > 0) {
-          // Load thread details with participants and last messages
-          const { data: threadsData, error: threadsError } = await supabase
-            .from('threads')
-            .select(`
-              *,
-              thread_participants(
-                user_id,
-                profiles!thread_participants_user_id_fkey(display_name, avatar_url)
-              )
-            `)
-            .in('id', threadIds)
-            .order('updated_at', { ascending: false });
-
-          if (threadsError) {
-            console.error('Error loading thread details:', threadsError);
-          } else {
-            // Load last message for each thread
-            const threadsWithMessages = await Promise.all(
-              (threadsData || []).map(async (thread) => {
-                const { data: lastMessage } = await supabase
-                  .from('messages')
-                  .select('content, created_at, sender_id')
-                  .eq('thread_id', thread.id)
-                  .order('created_at', { ascending: false })
-                  .limit(1)
-                  .single();
-
-                // Count unread messages
-                const { count: unreadCount } = await supabase
-                  .from('messages')
-                  .select('*', { count: 'exact', head: true })
-                  .eq('thread_id', thread.id)
-                  .not('read_by', 'cs', `{${profile.id}}`);
-
-                return {
-                  ...thread,
-                  participants: thread.thread_participants,
-                  last_message: lastMessage,
-                  unread_count: unreadCount || 0
-                };
-              })
-            );
-
-            setThreads(threadsWithMessages);
-          }
-        }
+        setThreads(threadsData || []);
       }
     } catch (error) {
       console.error('Error loading threads:', error);
       toast.error('Failed to load conversations');
+      setThreads([]);
     } finally {
       setLoading(false);
     }
@@ -219,31 +187,40 @@ const Messages: React.FC = () => {
     setLoadingMessages(true);
 
     try {
+      // Load messages without complex joins to avoid policy recursion
       const { data, error } = await supabase
         .from('messages')
-        .select(`
-          *,
-          profiles!messages_sender_id_fkey(display_name, avatar_url),
-          message_reactions(id, user_id, emoji, created_at),
-          message_attachments(id, file_path, mime_type, size_bytes, created_at)
-        `)
+        .select('*')
         .eq('thread_id', threadId)
         .order('created_at', { ascending: true });
 
       if (error) {
         console.error('Error loading messages:', error);
         toast.error('Failed to load messages');
+        setMessages([]);
       } else {
-        const messagesWithDetails = (data || []).map(message => ({
-          ...message,
-          sender_profile: message.profiles,
-          reactions: message.message_reactions || [],
-          attachments: message.message_attachments || []
-        }));
-        setMessages(messagesWithDetails);
+        // Load sender profiles separately to avoid join issues
+        const messagesWithProfiles = await Promise.all(
+          (data || []).map(async (message) => {
+            const { data: senderProfile, error: profileError } = await supabase
+              .from('profiles')
+              .select('display_name, avatar_url')
+              .eq('id', message.sender_id)
+              .limit(1)
+              .maybeSingle();
+
+            return {
+              ...message,
+              sender_profile: senderProfile || { display_name: 'Unknown User', avatar_url: null },
+              reactions: [],
+              attachments: []
+            };
+          })
+        );
+        setMessages(messagesWithProfiles);
 
         // Mark messages as read
-        const unreadMessageIds = messagesWithDetails
+        const unreadMessageIds = messagesWithProfiles
           .filter(m => !m.read_by.includes(profile?.id || ''))
           .map(m => m.id);
 
@@ -251,7 +228,7 @@ const Messages: React.FC = () => {
           await supabase
             .from('messages')
             .update({ 
-              read_by: [...(messagesWithDetails[0]?.read_by || []), profile?.id].filter(Boolean)
+              read_by: [...(messagesWithProfiles[0]?.read_by || []), profile?.id].filter(Boolean)
             })
             .in('id', unreadMessageIds);
         }
@@ -259,10 +236,12 @@ const Messages: React.FC = () => {
     } catch (error) {
       console.error('Error loading messages:', error);
       toast.error('Failed to load messages');
+      setMessages([]);
     } finally {
       setLoadingMessages(false);
     }
   };
+
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
