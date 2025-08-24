@@ -1,4 +1,6 @@
 import { supabase } from "./supabase";
+import { getFeatureFlagSafe, getAllFeatureFlagsSafe } from "./safeSupabase";
+import { firstRow } from "./firstRow";
 
 const cache = new Map<string, boolean>();
 
@@ -6,33 +8,43 @@ export async function isEnabled(key: string, uid?: string): Promise<boolean> {
   if (cache.has(key)) return cache.get(key)!;
   
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("feature_flags")
       .select("*")
       .eq("key", key)
-      .single();
+      .limit(1);
 
-    if (!data) return false;
+    if (error) {
+      console.warn(`[flags] Error loading ${key}, falling back to safe method`);
+      return await getFeatureFlagSafe(key);
+    }
 
-    let enabled = !!data.is_enabled;
+    const flag = firstRow(data);
+    if (!flag) {
+      console.warn(`[flags] Error loading ${key}, falling back to safe method`);
+      return await getFeatureFlagSafe(key);
+    }
+
+    let enabled = !!flag.is_enabled;
 
     // Role-based rollout
-    if (uid && Array.isArray(data.rollout?.roles)) {
+    if (uid && Array.isArray(flag.rollout?.roles)) {
       const { data: userRole } = await supabase
         .from("user_roles")
         .select("role")
         .eq("user_id", uid)
-        .single();
+        .limit(1);
 
-      if (userRole && data.rollout.roles.includes(userRole.role)) {
+      const roleRecord = firstRow(userRole);
+      if (roleRecord && flag.rollout.roles.includes(roleRecord.role)) {
         enabled = true;
       }
     }
 
     // Percentage-based rollout
-    if (uid && typeof data.rollout?.pct === "number") {
+    if (uid && typeof flag.rollout?.pct === "number") {
       const hash = [...uid].reduce((a, c) => ((a << 5) - a + c.charCodeAt(0)) | 0, 0);
-      if (Math.abs(hash) % 100 < data.rollout.pct) {
+      if (Math.abs(hash) % 100 < flag.rollout.pct) {
         enabled = true;
       }
     }
@@ -41,15 +53,25 @@ export async function isEnabled(key: string, uid?: string): Promise<boolean> {
     return enabled;
   } catch (error) {
     console.error("Error checking feature flag:", error);
-    return false;
+    return await getFeatureFlagSafe(key);
   }
 }
 
 export async function getAllFlags(): Promise<Record<string, boolean>> {
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("feature_flags")
       .select("key, is_enabled");
+
+    if (error) {
+      console.warn('[flags] Error loading all flags, falling back to safe method');
+      return await getAllFeatureFlagsSafe();
+    }
+
+    if (!data) {
+      console.warn('[flags] Error loading all flags, falling back to safe method');
+      return await getAllFeatureFlagsSafe();
+    }
 
     const flags: Record<string, boolean> = {};
     (data || []).forEach(flag => {
@@ -59,7 +81,7 @@ export async function getAllFlags(): Promise<Record<string, boolean>> {
     return flags;
   } catch (error) {
     console.error("Error loading feature flags:", error);
-    return {};
+    return await getAllFeatureFlagsSafe();
   }
 }
 
