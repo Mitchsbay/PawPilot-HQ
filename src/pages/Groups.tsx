@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { supabase, uploadFile } from '../lib/supabase';
+import { getMyGroupRole } from '../lib/membership';
 import { 
   Users, Plus, Search, Settings, Crown, UserPlus, 
   MessageCircle, Calendar, Image, MoreHorizontal,
@@ -78,7 +79,7 @@ const Groups: React.FC = () => {
 
     try {
       // Load all public groups and private groups user is member of
-      const { data: allGroupsData, error: allGroupsError } = await supabase
+      let { data: allGroupsData, error: allGroupsError } = await supabase
         .from('groups')
         .select(`
           *,
@@ -86,25 +87,39 @@ const Groups: React.FC = () => {
         `)
         .order('created_at', { ascending: false });
 
+      // Handle 406 errors by falling back to basic query
+      if (allGroupsError?.code === '406' || allGroupsError?.code === 'PGRST116') {
+        const { data: basicGroupsData, error: basicError } = await supabase
+          .from('groups')
+          .select('*')
+          .order('created_at', { ascending: false });
+        
+        if (!basicError) {
+          allGroupsData = basicGroupsData;
+          allGroupsError = null;
+        }
+      }
       if (allGroupsError) {
         console.error('Error loading groups:', allGroupsError);
         toast.error('Failed to load groups');
+        setGroups([]);
+        setMyGroups([]);
+        return;
       } else {
         // Check membership status for each group
         const groupsWithMembership = await Promise.all(
           (allGroupsData || []).map(async (group) => {
-            const { data: memberData } = await supabase
-              .from('group_members')
-              .select('role')
-              .eq('group_id', group.id)
-              .eq('user_id', profile.id)
-              .single();
+            const { role, error: memberError } = await getMyGroupRole(supabase, group.id, profile.id);
+            
+            if (memberError) {
+              console.error('Error checking group membership:', memberError);
+            }
 
             return {
               ...group,
               creator_profile: group.profiles,
-              user_role: memberData?.role,
-              user_is_member: !!memberData
+              user_role: role,
+              user_is_member: role !== null
             };
           })
         );
