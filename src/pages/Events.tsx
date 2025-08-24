@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
+import { getMyEventRSVP } from '../lib/membership';
 import { 
   Calendar, Plus, MapPin, Clock, Users, Star, 
   Filter, Search, X, Check, Edit, Trash2,
@@ -117,49 +118,61 @@ const Events: React.FC = () => {
 
     try {
       const now = new Date().toISOString();
-      let query = supabase
+      let { data: eventsData, error: eventsError } = await supabase
         .from('events')
         .select(`
           *,
           profiles!events_created_by_fkey(display_name, avatar_url),
           groups(name, avatar_url)
-        `);
+        `)
+        .order('start_datetime', { ascending: activeTab !== 'past' });
 
+      // Handle 406 errors by falling back to basic query
+      if (eventsError?.code === '406' || eventsError?.code === 'PGRST116') {
+        const { data: basicEventsData, error: basicError } = await supabase
+          .from('events')
+          .select('*')
+          .order('start_datetime', { ascending: activeTab !== 'past' });
+        
+        if (!basicError) {
+          eventsData = basicEventsData;
+          eventsError = null;
+        }
+      }
       // Filter based on active tab
       if (activeTab === 'upcoming') {
-        query = query.gte('start_datetime', now);
+        eventsData = eventsData?.filter(event => event.start_datetime >= now);
       } else if (activeTab === 'past') {
-        query = query.lt('start_datetime', now);
+        eventsData = eventsData?.filter(event => event.start_datetime < now);
       } else if (activeTab === 'my-events') {
-        query = query.eq('created_by', profile.id);
+        eventsData = eventsData?.filter(event => event.created_by === profile.id);
       }
 
       // Only show public events or events user is invited to
       if (activeTab !== 'my-events') {
-        query = query.eq('is_private', false);
+        eventsData = eventsData?.filter(event => !event.is_private);
       }
 
-      const { data: eventsData, error: eventsError } = await query
-        .order('start_datetime', { ascending: activeTab !== 'past' });
 
       if (eventsError) {
         console.error('Error loading events:', eventsError);
         toast.error('Failed to load events');
+        setEvents([]);
+        return;
       } else {
         // Check RSVP status for each event
         const eventsWithRSVP = await Promise.all(
           (eventsData || []).map(async (event) => {
-            const { data: rsvpData } = await supabase
-              .from('event_rsvps')
-              .select('status')
-              .eq('event_id', event.id)
-              .eq('user_id', profile.id)
-              .single();
+            const { status: rsvpStatus, error: rsvpError } = await getMyEventRSVP(supabase, event.id, profile.id);
+            
+            if (rsvpError) {
+              console.error('Error checking RSVP status:', rsvpError);
+            }
 
             return {
               ...event,
               creator_profile: event.profiles,
-              user_rsvp: rsvpData,
+              user_rsvp: rsvpStatus ? { status: rsvpStatus } : null,
               user_is_creator: event.created_by === profile.id
             };
           })
@@ -265,7 +278,7 @@ const Events: React.FC = () => {
     if (!profile) return;
 
     try {
-      if (event.user_rsvp) {
+      if (event.user_rsvp?.status) {
         // Update existing RSVP
         const { error } = await supabase
           .from('event_rsvps')
