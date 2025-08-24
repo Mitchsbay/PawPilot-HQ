@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase, Profile } from './supabase';
+import { firstRow } from './firstRow';
 
 interface AuthContextType {
   user: User | null;
@@ -63,16 +64,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loadProfile = async (userId: string) => {
     try {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .single();
+        .limit(1);
 
-      if (error && error.code !== 'PGRST116') {
+      // If no profile found or 406 error, try to create one
+      const profile = firstRow(data);
+      if (!profile || error?.code === 'PGRST116' || error?.code === '406') {
+        try {
+          // Create profile directly instead of using RPC
+          const { data: user } = await supabase.auth.getUser();
+          if (user.data.user) {
+            const { data: newProfile, error: createError } = await supabase
+              .from('profiles')
+              .insert({
+                id: user.data.user.id,
+                email: user.data.user.email || '',
+                display_name: user.data.user.user_metadata?.display_name || user.data.user.email?.split('@')[0] || 'User'
+              })
+              .select()
+              .limit(1);
+          }
+          
+          if (createError) {
+            console.error('Error creating profile:', createError);
+          } else {
+            data = newProfile;
+          }
+        } catch (createError) {
+          console.error('Error creating profile:', createError);
+        }
+      } else if (error) {
         console.error('Error loading profile:', error);
-      } else {
-        setProfile(data);
+      }
+      
+      if (profile) {
+        setProfile(profile);
       }
     } catch (error) {
       console.error('Error loading profile:', error);
@@ -127,10 +156,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .update(updates)
       .eq('id', user.id)
       .select()
-      .single();
+      .limit(1);
 
     if (!error) {
-      setProfile(data);
+      const updatedProfile = firstRow(data);
+      if (updatedProfile) {
+        setProfile(updatedProfile);
+      }
     }
 
     return { data, error };
