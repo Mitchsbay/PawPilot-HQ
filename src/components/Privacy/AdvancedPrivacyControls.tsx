@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
+import { firstRow } from '../../lib/firstRow';
 import { Lock, Users, Globe, Search, X, Plus, Check, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -207,9 +208,10 @@ const AdvancedPrivacyControls: React.FC = () => {
         .select('id')
         .eq('owner_id', profile.id)
         .eq('scope', scope)
-        .single();
+        .limit(1);
 
-      if (!rule) {
+      const ruleRecord = firstRow(rule);
+      if (!ruleRecord) {
         toast.error('Privacy rule not found');
         return;
       }
@@ -217,7 +219,7 @@ const AdvancedPrivacyControls: React.FC = () => {
       const { error } = await supabase
         .from('privacy_rule_overrides')
         .upsert({
-          rule_id: rule.id,
+          rule_id: ruleRecord.id,
           target_user_id: userId,
           allow
         });
