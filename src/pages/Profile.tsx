@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { supabase, Profile, Pet, Post } from '../lib/supabase';
+import { isFollowing } from '../lib/membership';
 import { 
   User, Heart, Camera, MessageCircle, Calendar, MapPin,
   Settings, UserPlus, UserMinus, Mail, Phone, Globe,
@@ -93,13 +94,19 @@ const UserProfile: React.FC = () => {
       let isFollowedBy = false;
 
       if (currentUser && !isOwnProfile) {
-        const { data: followData } = await supabase
-          .from('user_follows')
-          .select('*')
-          .or(`and(follower_id.eq.${currentUser.id},following_id.eq.${userId}),and(follower_id.eq.${userId},following_id.eq.${currentUser.id})`);
+        const [
+          { following: userFollowsProfile, error: followError1 },
+          { following: profileFollowsUser, error: followError2 }
+        ] = await Promise.all([
+          isFollowing(supabase, currentUser.id, userId),
+          isFollowing(supabase, userId, currentUser.id)
+        ]);
+        
+        if (followError1) console.error('Error checking follow status:', followError1);
+        if (followError2) console.error('Error checking follow back status:', followError2);
 
-        isFollowing = followData?.some(f => f.follower_id === currentUser.id && f.following_id === userId) || false;
-        isFollowedBy = followData?.some(f => f.follower_id === userId && f.following_id === currentUser.id) || false;
+        isFollowing = userFollowsProfile;
+        isFollowedBy = profileFollowsUser;
       }
 
       setProfileData({
