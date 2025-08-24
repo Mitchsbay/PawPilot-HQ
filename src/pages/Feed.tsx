@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { supabase, Pet, Post } from '../lib/supabase';
+import { hasLikedPost, hasSavedPost } from '../lib/membership';
 import { BUCKETS } from '../lib/buckets';
 import { uploadFileSecure } from '../lib/storage';
 import { 
@@ -127,16 +128,15 @@ const Feed: React.FC = () => {
         // Check which posts the user has liked
         const postsWithLikes = await Promise.all(
           (postsData || []).map(async (post) => {
-            const { data: likeData } = await supabase
-              .from('post_likes')
-              .select('id')
-              .eq('post_id', post.id)
-              .eq('user_id', profile.id)
-              .single();
+            const { liked, error: likeError } = await hasLikedPost(supabase, post.id, profile.id);
+            
+            if (likeError) {
+              console.error('Error checking like status:', likeError);
+            }
 
             return {
               ...post,
-              user_liked: !!likeData
+              user_liked: liked
             };
           })
         );
@@ -412,20 +412,21 @@ const Feed: React.FC = () => {
     if (!profile) return;
 
     try {
-      // Check if already saved
-      const { data: existingSave } = await supabase
-        .from('saved_posts')
-        .select('id')
-        .eq('user_id', profile.id)
-        .eq('post_id', post.id)
-        .single();
+      const { saved, error: saveError } = await hasSavedPost(supabase, post.id, profile.id);
+      
+      if (saveError) {
+        console.error('Error checking save status:', saveError);
+        toast.error('Failed to check save status');
+        return;
+      }
 
-      if (existingSave) {
+      if (saved) {
         // Unsave
         const { error } = await supabase
           .from('saved_posts')
           .delete()
-          .eq('id', existingSave.id);
+          .eq('user_id', profile.id)
+          .eq('post_id', post.id);
 
         if (!error) {
           toast.success('Post removed from saved');
