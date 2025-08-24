@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { firstRow } from './firstRow';
+import { firstRow } from './firstRow';
 
 export async function getMyGroupRole(
   sb: SupabaseClient,
@@ -12,7 +13,7 @@ export async function getMyGroupRole(
     .eq('group_id', groupId)
     .eq('user_id', userId)
     .limit(1);
-  if (error) return { role: null, error };
+  const row = firstRow(data);
   const row = firstRow(data);
   return { role: row?.role ?? null, error: null };
 }
@@ -28,7 +29,7 @@ export async function isInThread(
     .eq('thread_id', threadId)
     .eq('user_id', userId)
     .limit(1);
-  if (error) return { inThread: false, error };
+  const row = firstRow(data);
   const row = firstRow(data);
   return { inThread: !!row, error: null };
 }
@@ -44,7 +45,6 @@ export async function getMyEventRSVP(
     .eq('event_id', eventId)
     .eq('user_id', userId)
     .limit(1);
-  if (error) return { status: null, error };
   const row = firstRow(data);
   return { status: row?.status ?? null, error: null };
 }
@@ -60,7 +60,6 @@ export async function isFollowing(
     .eq('follower_id', followerId)
     .eq('following_id', followingId)
     .limit(1);
-  if (error) return { following: false, error };
   const row = firstRow(data);
   return { following: !!row, error: null };
 }
@@ -76,7 +75,6 @@ export async function hasLikedPost(
     .eq('post_id', postId)
     .eq('user_id', userId)
     .limit(1);
-  if (error) return { liked: false, error };
   const row = firstRow(data);
   return { liked: !!row, error: null };
 }
@@ -92,7 +90,6 @@ export async function hasSavedPost(
     .eq('post_id', postId)
     .eq('user_id', userId)
     .limit(1);
-  if (error) return { saved: false, error };
   const row = firstRow(data);
   return { saved: !!row, error: null };
 }
