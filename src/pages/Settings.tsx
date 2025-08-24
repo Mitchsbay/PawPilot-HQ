@@ -118,11 +118,14 @@ const Settings: React.FC = () => {
   };
 
   const handleProfileSave = async () => {
-    if (!profile) return;
-
+      .select()
+      .limit(1);
     if (!profileData.display_name.trim()) {
       toast.error('Display name is required');
-      return;
+      const updatedProfile = firstRow(data);
+      if (updatedProfile) {
+        setProfile(updatedProfile);
+      }
     }
 
     setLoading(true);
