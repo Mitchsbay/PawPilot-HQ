@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
+import { firstRow } from '../../lib/firstRow';
 import { Heart, MessageCircle, Share, Bookmark, MoreHorizontal, Edit, Trash2, Flag, UserX } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -56,14 +57,15 @@ const PostActions: React.FC<PostActionsProps> = ({
         .select('id')
         .eq('user_id', profile.id)
         .eq('post_id', post.id)
-        .single();
+        .limit(1);
 
-      if (existingSave) {
+      const saveRecord = firstRow(existingSave);
+      if (saveRecord) {
         // Unsave
         const { error } = await supabase
           .from('saved_posts')
           .delete()
-          .eq('id', existingSave.id);
+          .eq('id', saveRecord.id);
 
         if (!error) {
           toast.success('Post removed from saved');
