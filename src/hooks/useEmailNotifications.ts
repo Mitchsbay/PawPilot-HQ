@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
+import { firstRow } from '../lib/firstRow';
 import toast from 'react-hot-toast';
 
 interface EmailPreferences {
@@ -42,12 +43,15 @@ export const useEmailNotifications = () => {
         .from('email_preferences')
         .select('*')
         .eq('user_id', profile.id)
-        .single();
+        .limit(1);
 
       if (error && error.code !== 'PGRST116') {
         console.error('Error loading email preferences:', error);
-      } else if (data) {
-        setPreferences(data);
+      } else {
+        const preferences = firstRow(data);
+        if (preferences) {
+          setPreferences(preferences);
+        }
       }
     } catch (error) {
       console.error('Error loading email preferences:', error);
