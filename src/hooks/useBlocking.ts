@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
+import { firstRow } from '../lib/firstRow';
 import toast from 'react-hot-toast';
 
 interface BlockedUser {
@@ -59,9 +60,10 @@ export const useBlocking = () => {
         .select('id')
         .eq('blocker_id', profile.id)
         .eq('blocked_user_id', userId)
-        .single();
+        .limit(1);
 
-      if (existingBlock) {
+      const blockRecord = firstRow(existingBlock);
+      if (blockRecord) {
         toast.error('User is already blocked');
         setLoading(false);
         return;
@@ -134,9 +136,10 @@ export const useBlocking = () => {
         .select('id')
         .eq('blocker_id', profile.id)
         .eq('blocked_user_id', userId)
-        .single();
+        .limit(1);
 
-      return !!data && !error;
+      const blockRecord = firstRow(data);
+      return !!blockRecord && !error;
     } catch (error) {
       return false;
     }
