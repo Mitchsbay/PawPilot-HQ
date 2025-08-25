@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
-import { firstRow } from '../lib/firstRow';
-import { firstRow } from '../lib/firstRow';
+import { firstRow } from '@/lib/firstRow';
 import toast from 'react-hot-toast';
 
 interface EmailPreferences {
