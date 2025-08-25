@@ -1,6 +1,5 @@
 import { supabase } from './supabase';
-import { firstRow } from './firstRow';
-import { firstRow } from './firstRow';
+import { firstRow } from '@/lib/firstRow';
 
 /**
  * Safe wrapper for feature flag queries that never break the UI
