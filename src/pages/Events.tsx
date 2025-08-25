@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 import { getMyEventRSVP } from '../lib/membership';
+import { firstRow } from '../lib/firstRow';
 import { 
   Calendar, Plus, MapPin, Clock, Users, Star, 
   Filter, Search, X, Check, Edit, Trash2,
@@ -118,7 +119,7 @@ const Events: React.FC = () => {
 
     try {
       const now = new Date().toISOString();
-      let { data: eventsData, error: eventsError } = await supabase
+      const { data: eventsData, error: eventsError } = await supabase
         .from('events')
         .select(`
           *,
@@ -127,30 +128,19 @@ const Events: React.FC = () => {
         `)
         .order('start_datetime', { ascending: activeTab !== 'past' });
 
-      // Handle 406 errors by falling back to basic query
-      if (eventsError?.code === '406' || eventsError?.code === 'PGRST116') {
-        const { data: basicEventsData, error: basicError } = await supabase
-          .from('events')
-          .select('*')
-          .order('start_datetime', { ascending: activeTab !== 'past' });
-        
-        if (!basicError) {
-          eventsData = basicEventsData;
-          eventsError = null;
-        }
-      }
       // Filter based on active tab
+      let filteredEvents = eventsData;
       if (activeTab === 'upcoming') {
-        eventsData = eventsData?.filter(event => event.start_datetime >= now);
+        filteredEvents = eventsData?.filter(event => event.start_datetime >= now);
       } else if (activeTab === 'past') {
-        eventsData = eventsData?.filter(event => event.start_datetime < now);
+        filteredEvents = eventsData?.filter(event => event.start_datetime < now);
       } else if (activeTab === 'my-events') {
-        eventsData = eventsData?.filter(event => event.created_by === profile.id);
+        filteredEvents = eventsData?.filter(event => event.created_by === profile.id);
       }
 
       // Only show public events or events user is invited to
       if (activeTab !== 'my-events') {
-        eventsData = eventsData?.filter(event => !event.is_private);
+        filteredEvents = filteredEvents?.filter(event => !event.is_private);
       }
 
 
@@ -158,11 +148,10 @@ const Events: React.FC = () => {
         console.error('Error loading events:', eventsError);
         toast.error('Failed to load events');
         setEvents([]);
-        return;
       } else {
         // Check RSVP status for each event
         const eventsWithRSVP = await Promise.all(
-          (eventsData || []).map(async (event) => {
+          (filteredEvents || []).map(async (event) => {
             const { status: rsvpStatus, error: rsvpError } = await getMyEventRSVP(supabase, event.id, profile.id);
             
             if (rsvpError) {
@@ -183,6 +172,7 @@ const Events: React.FC = () => {
     } catch (error) {
       console.error('Error loading events:', error);
       toast.error('Failed to load events');
+      setEvents([]);
     } finally {
       setLoading(false);
     }
@@ -206,6 +196,7 @@ const Events: React.FC = () => {
       }
     } catch (error) {
       console.error('Error loading user groups:', error);
+      setGroups([]);
     }
   };
 
