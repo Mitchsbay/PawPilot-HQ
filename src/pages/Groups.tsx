@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { supabase, uploadFile } from '../lib/supabase';
 import { getMyGroupRole } from '../lib/membership';
-import { getMyGroupRole } from '../lib/membership';
+import { firstRow } from '../lib/firstRow';
 import { 
   Users, Plus, Search, Settings, Crown, UserPlus, 
   MessageCircle, Calendar, Image, MoreHorizontal,
@@ -80,7 +80,7 @@ const Groups: React.FC = () => {
 
     try {
       // Load all public groups and private groups user is member of
-      let { data: allGroupsData, error: allGroupsError } = await supabase
+      const { data: allGroupsData, error: allGroupsError } = await supabase
         .from('groups')
         .select(`
           *,
@@ -88,24 +88,11 @@ const Groups: React.FC = () => {
         `)
         .order('created_at', { ascending: false });
 
-      // Handle 406 errors by falling back to basic query
-      if (allGroupsError?.code === '406' || allGroupsError?.code === 'PGRST116') {
-        const { data: basicGroupsData, error: basicError } = await supabase
-          .from('groups')
-          .select('*')
-          .order('created_at', { ascending: false });
-        
-        if (!basicError) {
-          allGroupsData = basicGroupsData;
-          allGroupsError = null;
-        }
-      }
       if (allGroupsError) {
         console.error('Error loading groups:', allGroupsError);
         toast.error('Failed to load groups');
         setGroups([]);
         setMyGroups([]);
-        return;
       } else {
         // Check membership status for each group
         const groupsWithMembership = await Promise.all(
@@ -139,6 +126,8 @@ const Groups: React.FC = () => {
     } catch (error) {
       console.error('Error loading groups:', error);
       toast.error('Failed to load groups');
+      setGroups([]);
+      setMyGroups([]);
     } finally {
       setLoading(false);
     }
@@ -348,6 +337,7 @@ const Groups: React.FC = () => {
       }
     } catch (error) {
       console.error('Error loading group members:', error);
+      setGroupMembers([]);
     }
   };
 
