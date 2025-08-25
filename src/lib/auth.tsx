@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import type { User, Session } from '@supabase/supabase-js';
 import { supabase, type Profile } from './supabase';
-import { firstRow } from './firstRow';
+import { firstRow } from '@/lib/firstRow';
 
 interface AuthContextType {
   user: User | null;
@@ -65,20 +65,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loadProfile = async (userId: string) => {
     setLoading(true);
     try {
-      // Use maybeSingle() so “no row” is not treated as an error/406
-      let { data: row, error } = await supabase
+      const { data: profileData, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
 
-      if (error && error.code !== 'PGRST116') {
-        // Log non-trivial errors (PGRST116 == “Results contain 0 rows”)
+      if (error) {
         console.error('Error loading profile:', error);
       }
 
-      // If no profile exists, create one client-side (RLS allows insert where id = auth.uid())
-      if (!row) {
+      let profile = profileData;
+
+      // If no profile exists, create one
+      if (!profile) {
         const { data: userRes } = await supabase.auth.getUser();
         const u = userRes.user;
         if (u) {
@@ -92,17 +92,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 (u.email ? u.email.split('@')[0] : 'User'),
             })
             .select('*')
-            .maybeSingle();
+            .single();
 
           if (createError) {
             console.error('Error creating profile:', createError);
           } else {
-            row = inserted ?? null;
+            profile = inserted;
           }
         }
       }
 
-      setProfile(row ?? null);
+      setProfile(profile);
     } catch (e) {
       console.error('Unexpected error loading profile:', e);
     } finally {
