@@ -15,6 +15,7 @@ import ReportModal from '../components/Moderation/ReportModal';
 import BlockUserModal from '../components/Moderation/BlockUserModal';
 import ProfileStats from '../components/Profile/ProfileStats';
 import FollowButton from '../components/Profile/FollowButton';
+import PetCard from '../components/Pets/PetCard';
 import PetGallery from '../components/Pets/PetGallery';
 import { useBlocking } from '../hooks/useBlocking';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
@@ -38,6 +39,7 @@ const UserProfile: React.FC = () => {
   const [pets, setPets] = useState<Pet[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'posts' | 'pets' | 'activity' | 'about'>('posts');
   const [showReportModal, setShowReportModal] = useState(false);
   const [showBlockModal, setShowBlockModal] = useState(false);
@@ -62,17 +64,23 @@ const UserProfile: React.FC = () => {
   const loadProfileData = async () => {
     if (!userId) return;
 
+    setError(null);
     try {
       // Load profile with stats
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
 
       if (profileError) {
         console.error('Error loading profile:', profileError);
-        toast.error('Failed to load profile');
+        setError('Failed to load profile');
+        return;
+      }
+
+      if (!profileData) {
+        setError('Profile not found');
         return;
       }
 
@@ -128,7 +136,7 @@ const UserProfile: React.FC = () => {
           .eq('visibility', 'public')
           .order('created_at', { ascending: false });
 
-        setPets(petsData || []);
+        setPets(Array.isArray(petsData) ? petsData : []);
       }
 
       // Load posts if visible
@@ -141,12 +149,12 @@ const UserProfile: React.FC = () => {
           .order('created_at', { ascending: false })
           .limit(10);
 
-        setPosts(postsData || []);
+        setPosts(Array.isArray(postsData) ? postsData : []);
       }
 
     } catch (error) {
       console.error('Error loading profile data:', error);
-      toast.error('Failed to load profile');
+      setError('Failed to load profile data');
     } finally {
       setLoading(false);
     }
@@ -281,13 +289,17 @@ const UserProfile: React.FC = () => {
     );
   }
 
-  if (!profileData) {
+  if (error || !profileData) {
     return (
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="text-center">
           <User className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Profile not found</h1>
-          <p className="text-gray-600">This user doesn't exist or their profile is private.</p>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">
+            {error || 'Profile not found'}
+          </h1>
+          <p className="text-gray-600">
+            {error ? 'Please try refreshing the page.' : 'This user doesn\'t exist or their profile is private.'}
+          </p>
         </div>
       </div>
     );
@@ -510,7 +522,7 @@ const UserProfile: React.FC = () => {
 
           {activeTab === 'pets' && (
             <div>
-              {pets.length > 0 ? (
+              {Array.isArray(pets) && pets.length > 0 ? (
                 <div className="space-y-8">
                   {pets.map((pet) => (
                     <div key={pet.id} className="bg-white rounded-lg shadow-md p-6">
@@ -556,9 +568,8 @@ const UserProfile: React.FC = () => {
               <div className="mt-8 space-y-6">
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">About</h3>
-                  {profileData.bio ? (
-                    <p className="text-gray-700">{profileData.bio}</p>
-                  ) : (
+                  <p className="text-gray-700">{profileData.bio ?? ''}</p>
+                  {!profileData.bio && (
                     <p className="text-gray-500 italic">No bio available</p>
                   )}
                 </div>
