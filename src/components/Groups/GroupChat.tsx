@@ -78,8 +78,8 @@ const GroupChat: React.FC<GroupChatProps> = ({ groupId, groupName, userRole }) =
         .from('threads')
         .select('id')
         .eq('is_group', true)
-        .eq('group_id', groupId)
-        .limit(1);
+        .eq('created_by', groupId) // Use created_by as group identifier for now
+        .maybeSingle();
 
       if (findErr) {
         console.error('Error checking for existing thread:', findErr);
@@ -87,8 +87,7 @@ const GroupChat: React.FC<GroupChatProps> = ({ groupId, groupName, userRole }) =
         return;
       }
 
-      const threadRecord = Array.isArray(existingThread) ? existingThread[0] : null;
-      let currentThreadId = threadRecord?.id;
+      let currentThreadId = existingThread?.id;
 
       if (!currentThreadId) {
         // Create new group thread
@@ -96,11 +95,11 @@ const GroupChat: React.FC<GroupChatProps> = ({ groupId, groupName, userRole }) =
           .from('threads')
           .insert({
             is_group: true,
-            created_by: profile?.id,
-            name: groupName || 'Group Chat'
+            created_by: groupId, // Store group ID in created_by for now
+            name: groupName || 'Group Chat',
           })
           .select()
-          .limit(1);
+          .single();
 
         if (threadError) {
           console.error('Error creating group thread:', threadError);
@@ -108,51 +107,34 @@ const GroupChat: React.FC<GroupChatProps> = ({ groupId, groupName, userRole }) =
           return;
         }
 
-        const newThreadRecord = Array.isArray(newThread) ? newThread[0] : null;
-        if (!newThreadRecord) {
-          console.error('No thread returned after creation');
-          toast.error('Failed to initialize group chat');
-          return;
-        }
-        
-        currentThreadId = newThreadRecord.id;
+        currentThreadId = newThread.id;
 
-        // Ensure the current user is a participant (use upsert to avoid duplicates)
-        const { error: participantError } = await supabase
+        // Add current user as participant
+        await supabase
           .from('thread_participants')
-          .upsert({
+          .insert({
             thread_id: currentThreadId,
-            user_id: profile?.id
-          }, { onConflict: 'thread_id,user_id' });
+            user_id: profile?.id,
+          });
 
-        if (participantError) {
-          console.error('Error adding user as participant:', participantError);
-          // Don't fail completely, just log the error
-        }
-
-        // Add other group members as thread participants
+        // Add other group members
         const { data: groupMembers } = await supabase
           .from('group_members')
           .select('user_id')
           .eq('group_id', groupId);
 
-        if (groupMembers && groupMembers.length > 0) {
+        if (groupMembers?.length) {
           const participants = groupMembers
             .filter(member => member.user_id !== profile?.id)
             .map(member => ({
               thread_id: currentThreadId,
-              user_id: member.user_id
+              user_id: member.user_id,
             }));
 
-          if (participants.length > 0) {
-            const { error: bulkParticipantError } = await supabase
+          if (participants.length) {
+            await supabase
               .from('thread_participants')
-              .upsert(participants, { onConflict: 'thread_id,user_id' });
-            
-            if (bulkParticipantError) {
-              console.error('Error adding group members as participants:', bulkParticipantError);
-              // Don't fail completely, just log the error
-            }
+              .insert(participants);
           }
         }
       }
