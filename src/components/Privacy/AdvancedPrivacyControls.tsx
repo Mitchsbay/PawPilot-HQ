@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
 import { firstRow } from '../../lib/firstRow';
+import { firstRow } from '../../lib/firstRow';
 import { Lock, Users, Globe, Search, X, Plus, Check, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
