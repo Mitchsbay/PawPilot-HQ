@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 import { isInThread } from '../lib/membership';
-import { firstRow } from '../lib/firstRow';
+import { firstRow } from '@/lib/firstRow';
 import { 
   MessageCircle, Plus, Search, Phone, Video, MoreHorizontal,
   Send, Paperclip, Smile, User, Users, Settings, X, Image
