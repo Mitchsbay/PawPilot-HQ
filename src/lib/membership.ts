@@ -1,6 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { firstRow } from './firstRow';
-import { firstRow } from './firstRow';
 
 export async function getMyGroupRole(
   sb: SupabaseClient,
@@ -12,7 +11,7 @@ export async function getMyGroupRole(
     .select('role')
     .eq('group_id', groupId)
     .eq('user_id', userId)
-    .limit(1);
+    .limit(1)
     .maybeSingle();
   if (error) return { role: null, error };
   return { role: data?.role ?? null, error: null };
@@ -28,7 +27,7 @@ export async function isInThread(
     .select('user_id')
     .eq('thread_id', threadId)
     .eq('user_id', userId)
-    .limit(1);
+    .limit(1)
     .maybeSingle();
   if (error) return { inThread: false, error };
   return { inThread: !!data, error: null };
@@ -44,6 +43,7 @@ export async function getMyEventRSVP(
     .select('status')
     .eq('event_id', eventId)
     .eq('user_id', userId)
+    .limit(1)
     .maybeSingle();
   if (error) return { status: null, error };
   return { status: data?.status ?? null, error: null };
@@ -59,6 +59,7 @@ export async function isFollowing(
     .select('id')
     .eq('follower_id', followerId)
     .eq('following_id', followingId)
+    .limit(1)
     .maybeSingle();
   if (error) return { following: false, error };
   return { following: !!data, error: null };
@@ -74,6 +75,7 @@ export async function hasLikedPost(
     .select('id')
     .eq('post_id', postId)
     .eq('user_id', userId)
+    .limit(1)
     .maybeSingle();
   if (error) return { liked: false, error };
   return { liked: !!data, error: null };
@@ -89,6 +91,7 @@ export async function hasSavedPost(
     .select('id')
     .eq('post_id', postId)
     .eq('user_id', userId)
+    .limit(1)
     .maybeSingle();
   if (error) return { saved: false, error };
   return { saved: !!data, error: null };
