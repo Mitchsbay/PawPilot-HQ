@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 import { isInThread } from '../lib/membership';
+import { firstRow } from '../lib/firstRow';
 import { 
   MessageCircle, Plus, Search, Phone, Video, MoreHorizontal,
   Send, Paperclip, Smile, User, Users, Settings, X, Image
@@ -148,30 +149,26 @@ const Messages: React.FC = () => {
       if (participantError) {
         console.error('Error loading thread participants:', participantError);
         setThreads([]);
-        setLoading(false);
-        return;
-      }
-
-      const threadIds = participantData?.map(tp => tp.thread_id) || [];
-      
-      if (threadIds.length === 0) {
-        setThreads([]);
-        setLoading(false);
-        return;
-      }
-
-      // Load thread details
-      const { data: threadsData, error: threadsError } = await supabase
-        .from('threads')
-        .select('*')
-        .in('id', threadIds)
-        .order('updated_at', { ascending: false });
-
-      if (threadsError) {
-        console.error('Error loading threads:', threadsError);
-        setThreads([]);
       } else {
-        setThreads(threadsData || []);
+        const threadIds = participantData?.map(tp => tp.thread_id) || [];
+        
+        if (threadIds.length === 0) {
+          setThreads([]);
+        } else {
+          // Load thread details
+          const { data: threadsData, error: threadsError } = await supabase
+            .from('threads')
+            .select('*')
+            .in('id', threadIds)
+            .order('updated_at', { ascending: false });
+
+          if (threadsError) {
+            console.error('Error loading threads:', threadsError);
+            setThreads([]);
+          } else {
+            setThreads(threadsData || []);
+          }
+        }
       }
     } catch (error) {
       console.error('Error loading threads:', error);
@@ -204,12 +201,12 @@ const Messages: React.FC = () => {
               .from('profiles')
               .select('display_name, avatar_url')
               .eq('id', message.sender_id)
-              .limit(1)
-              .maybeSingle();
+              .limit(1);
 
+            const profile = firstRow(senderProfile);
             return {
               ...message,
-              sender_profile: senderProfile || { display_name: 'Unknown User', avatar_url: null },
+              sender_profile: profile || { display_name: 'Unknown User', avatar_url: null },
               reactions: [],
               attachments: []
             };
