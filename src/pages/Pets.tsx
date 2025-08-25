@@ -9,7 +9,6 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import ConfirmDialog from '../components/UI/ConfirmDialog';
-import PetCard from '../components/Pets/PetCard';
 
 const Pets: React.FC = () => {
   const { profile } = useAuth();
@@ -64,7 +63,7 @@ const Pets: React.FC = () => {
         console.error('Error loading pets:', error);
         toast.error('Failed to load pets');
       } else {
-        setPets(data || []);
+        setPets(Array.isArray(data) ? data : []);
       }
     } catch (error) {
       console.error('Error loading pets:', error);
@@ -261,15 +260,104 @@ const Pets: React.FC = () => {
       </div>
 
       {/* Pets Grid */}
-      {Array.isArray(pets) && pets.length > 0 ? (
+      {pets.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {pets.map((pet, index) => (
-            <PetCard
+            <motion.div
               key={pet.id}
-              pet={pet}
-              onEdit={() => handleEdit(pet)}
-              onDelete={() => setDeletingPet(pet)}
-            />
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.1 }}
+              className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow"
+            >
+              {/* Pet Photo */}
+              <div className="relative h-48">
+                {pet.photo_url ? (
+                  <img
+                    src={pet.photo_url}
+                    alt={pet.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-gradient-to-br from-blue-100 to-purple-100 flex items-center justify-center">
+                    <Heart className="h-12 w-12 text-gray-400" />
+                  </div>
+                )}
+                
+                {/* Action Buttons */}
+                <div className="absolute top-2 right-2 flex space-x-2">
+                  <button
+                    onClick={() => handleEdit(pet)}
+                    className="p-2 bg-white/90 rounded-full hover:bg-white transition-colors"
+                  >
+                    <Edit className="h-4 w-4 text-gray-600" />
+                  </button>
+                  <button
+                    onClick={() => setDeletingPet(pet)}
+                    className="p-2 bg-white/90 rounded-full hover:bg-white transition-colors"
+                  >
+                    <Trash2 className="h-4 w-4 text-red-600" />
+                  </button>
+                </div>
+
+                {/* Lost Badge */}
+                {pet.is_lost && (
+                  <div className="absolute top-2 left-2 bg-red-500 text-white px-2 py-1 rounded-full text-xs font-medium">
+                    Lost
+                  </div>
+                )}
+              </div>
+
+              {/* Pet Info */}
+              <div className="p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xl font-semibold text-gray-900">{pet.name}</h3>
+                  <span className="text-sm text-gray-500 capitalize">{pet.species}</span>
+                </div>
+
+                {pet.breed && (
+                  <p className="text-gray-600 text-sm mb-2">{pet.breed}</p>
+                )}
+
+                <div className="space-y-2 text-sm text-gray-600">
+                  {pet.date_of_birth && (
+                    <div className="flex items-center">
+                      <Calendar className="h-4 w-4 mr-2" />
+                      <span>{new Date(pet.date_of_birth).toLocaleDateString()}</span>
+                    </div>
+                  )}
+                  
+                  {pet.weight && (
+                    <div className="flex items-center">
+                      <span className="w-4 h-4 mr-2 text-center">⚖️</span>
+                      <span>{pet.weight} lbs</span>
+                    </div>
+                  )}
+                  
+                  {pet.color && (
+                    <div className="flex items-center">
+                      <span className="w-4 h-4 mr-2 text-center">🎨</span>
+                      <span>{pet.color}</span>
+                    </div>
+                  )}
+                </div>
+
+                {pet.bio && (
+                  <p className="text-gray-700 text-sm mt-3 line-clamp-2">{pet.bio}</p>
+                )}
+
+                {/* Footer */}
+                <div className="mt-3 flex justify-between items-center">
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                    pet.visibility === 'public' ? 'bg-green-100 text-green-800' :
+                    pet.visibility === 'friends' ? 'bg-blue-100 text-blue-800' :
+                    'bg-gray-100 text-gray-800'
+                  }`}>
+                    {pet.visibility}
+                  </span>
+                </div>
+              </div>
+            </motion.div>
           ))}
         </div>
       ) : (
