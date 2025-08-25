@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../lib/auth';
 import { supabase, uploadFile } from '../lib/supabase';
-import {
-  User, Lock, Bell, Eye, Shield, Trash2, Upload,
-  Check, X, Camera, Mail, Phone, Globe, Users,
+import { 
+  User, Lock, Bell, Eye, Shield, Trash2, Upload, 
+  Check, X, Camera, Mail, Phone, Globe, Users, 
   UserX, MessageCircle, Heart, Calendar, MapPin, Bookmark,
   AlertTriangle, Save, BarChart, Edit, Crown
 } from 'lucide-react';
@@ -19,12 +19,10 @@ import UserAnalytics from '../components/Analytics/UserAnalytics';
 import AdvancedPrivacyControls from '../components/Privacy/AdvancedPrivacyControls';
 
 import Billing from '../features/payments/Billing';
-
 const Settings: React.FC = () => {
   const { profile, updateProfile, signOut } = useAuth();
   const { isSupported: pushSupported, isSubscribed: pushSubscribed, loading: pushLoading, subscribeToPush, unsubscribeFromPush } = usePushNotifications();
   const { preferences: emailPreferences, loading: emailLoading, updateEmailPreferences, sendTestEmail } = useEmailNotifications();
-
   const [activeTab, setActiveTab] = useState('profile');
   const [loading, setLoading] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -111,16 +109,15 @@ const Settings: React.FC = () => {
         toast.error('Avatar must be less than 5MB');
         return;
       }
+      
       setAvatarFile(file);
       const reader = new FileReader();
-      reader.onload = (ev) => setAvatarPreview(ev.target?.result as string);
+      reader.onload = (e) => setAvatarPreview(e.target?.result as string);
       reader.readAsDataURL(file);
     }
   };
 
   const handleProfileSave = async () => {
-    if (!profile) return;
-
     if (!profileData.display_name.trim()) {
       toast.error('Display name is required');
       return;
@@ -129,19 +126,18 @@ const Settings: React.FC = () => {
     setLoading(true);
 
     try {
-      let avatarUrl: string | null = profile.avatar_url || null;
+      let avatarUrl = profile.avatar_url;
 
       // Upload new avatar if provided
       if (avatarFile) {
         const filename = `avatar_${Date.now()}.${avatarFile.name.split('.').pop()}`;
-        const uploadedUrl = await uploadFile('avatars', filename, avatarFile);
-
-        if (!uploadedUrl) {
+        avatarUrl = await uploadFile('avatars', filename, avatarFile);
+        
+        if (!avatarUrl) {
           toast.error('Failed to upload avatar');
           setLoading(false);
           return;
         }
-        avatarUrl = uploadedUrl;
       }
 
       const updates = {
@@ -217,6 +213,7 @@ const Settings: React.FC = () => {
 
     try {
       // Note: In a real app, you'd want to handle this server-side
+      // This is a simplified version for demonstration
       const { error } = await supabase.auth.admin.deleteUser(profile.id);
 
       if (error) {
@@ -236,7 +233,7 @@ const Settings: React.FC = () => {
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-medium text-gray-900 mb-4">Profile Information</h3>
-
+        
         {/* Avatar Upload */}
         <div className="flex items-center space-x-6 mb-6">
           <div className="relative">
@@ -349,7 +346,7 @@ const Settings: React.FC = () => {
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-medium text-gray-900 mb-4">Privacy Settings</h3>
-
+        
         <div className="space-y-6">
           {/* Profile Visibility */}
           <div>
@@ -487,7 +484,7 @@ const Settings: React.FC = () => {
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-medium text-gray-900 mb-4">Notification Preferences</h3>
-
+        
         <div className="space-y-6">
           <div>
             <h4 className="font-medium text-gray-900 mb-4">Social Notifications</h4>
@@ -816,7 +813,7 @@ const Settings: React.FC = () => {
     <div className="space-y-6">
       <div>
         <h3 className="text-lg font-medium text-gray-900 mb-4">Account Management</h3>
-
+        
         <div className="space-y-6">
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
             <div className="flex items-start space-x-3">
