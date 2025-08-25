@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import { getFeatureFlagSafe, getAllFeatureFlagsSafe } from "./safeSupabase";
 import { firstRow } from "./firstRow";
+import { firstRow } from "./firstRow";
 
 const cache = new Map<string, boolean>();
 
