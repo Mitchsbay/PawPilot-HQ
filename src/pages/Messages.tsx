@@ -2,23 +2,22 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
-import { 
+import {
   MessageCircle, Plus, Search, Phone, Video, MoreHorizontal,
   Send, Paperclip, Smile, User, Users, Image
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
-import OnlineIndicator from '../components/UI/OnlineIndicator';
 import TypingIndicator from '../components/UI/TypingIndicator';
 import MessageReactions from '../components/Messages/MessageReactions';
 import MessageAttachments from '../components/Messages/MessageAttachments';
 import { useTypingIndicator } from '../hooks/useTypingIndicator';
-import { useOnlineStatus } from '../hooks/useOnlineStatus';
 
 type Thread = {
   id: string;
   name?: string | null;
   is_group: boolean;
+  group_id: string | null;
   created_by: string;
   created_at: string | null;
   updated_at: string | null;
@@ -30,7 +29,6 @@ type Message = {
   sender_id: string;
   content: string | null;
   created_at: string | null;
-  // keep optional fields for UI compatibility
   media_url?: string | null;
   read_by?: string[] | null;
   sender_profile?: {
@@ -65,76 +63,17 @@ const Messages: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Typing indicator
+  // Typing indicator scoped to the current thread
   const { typingUsers, handleTyping, stopTyping } = useTypingIndicator(selectedThread?.id || '');
 
-  // Debounced stop typing
+  // Debounced stop-typing
   const stopTypingTimeoutRef = useRef<NodeJS.Timeout>();
   const debouncedStopTyping = () => {
     if (stopTypingTimeoutRef.current) clearTimeout(stopTypingTimeoutRef.current);
     stopTypingTimeoutRef.current = setTimeout(() => stopTyping(), 1200);
   };
 
-  useEffect(() => {
-    if (profile) {
-      bootstrapThreads();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile]);
-
-  // If ?group or ?partner is in the URL, ensure a thread exists, then select it.
-  useEffect(() => {
-    if (!profile || threads.length === 0) return;
-    const groupId = searchParams.get('group');
-    const partnerId = searchParams.get('partner');
-
-    (async () => {
-      try {
-        if (groupId) {
-          const tId = await ensureGroupThread(groupId);
-          const t = threads.find(t => t.id === tId) ?? null;
-          setSelectedThread(t);
-        } else if (partnerId) {
-          const tId = await ensureDirectThread(partnerId);
-          const t = threads.find(t => t.id === tId) ?? null;
-          setSelectedThread(t);
-        }
-      } catch (e) {
-        console.error(e);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, threads, profile]);
-
-  useEffect(() => {
-    if (!selectedThread) return;
-
-    loadMessages(selectedThread.id);
-
-    // realtime
-    const subscription = supabase
-      .channel(`messages:${selectedThread.id}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'messages',
-        filter: `thread_id=eq.${selectedThread.id}`
-      }, () => {
-        // fetch latest; could be optimized by appending payload.new
-        loadMessages(selectedThread.id);
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(subscription);
-    };
-  }, [selectedThread]);
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  /** Ensure we’re signed in (so RLS sees auth.uid()) */
+  // Ensure user session (so RLS sees auth.uid())
   async function requireSession() {
     const { data: { session }, error } = await supabase.auth.getSession();
     if (error) throw error;
@@ -142,7 +81,7 @@ const Messages: React.FC = () => {
     return session;
   }
 
-  /** Load all accessible threads (narrow select, no '*', no implicit joins) */
+  // Bootstrap threads list (narrow select, no joins)
   const bootstrapThreads = async () => {
     setLoading(true);
     try {
@@ -163,7 +102,7 @@ const Messages: React.FC = () => {
     }
   };
 
-  /** Ensure a group thread exists via RPC; return its id. */
+  // Ensure a group thread via RPC and return its id
   async function ensureGroupThread(groupId: string): Promise<string> {
     await requireSession();
     const { data, error } = await supabase.rpc('chat_init_group', { p_group_id: groupId });
@@ -173,12 +112,10 @@ const Messages: React.FC = () => {
     }
     const tId = data?.[0]?.thread_id as string | undefined;
     if (!tId) throw new Error('chat_init_group returned no thread_id');
-    // refresh thread list to include it
-    await bootstrapThreads();
     return tId;
   }
 
-  /** Ensure a direct thread exists via RPC; return its id. */
+  // Ensure a direct thread via RPC and return its id
   async function ensureDirectThread(partnerUserId: string): Promise<string> {
     await requireSession();
     const { data, error } = await supabase.rpc('chat_init_direct', { p_partner: partnerUserId });
@@ -188,11 +125,10 @@ const Messages: React.FC = () => {
     }
     const tId = data?.[0]?.thread_id as string | undefined;
     if (!tId) throw new Error('chat_init_direct returned no thread_id');
-    await bootstrapThreads();
     return tId;
   }
 
-  /** Load messages (narrow select); then N+1 fetch minimal sender profiles */
+  // Load messages (narrow select), then fetch minimal sender profiles
   const loadMessages = async (threadId: string) => {
     setLoadingMessages(true);
     try {
@@ -208,7 +144,7 @@ const Messages: React.FC = () => {
 
       const rows = (data || []) as Message[];
 
-      // fetch sender profiles (minimal)
+      // Fetch sender profiles (minimal) — safe N+1
       const withProfiles = await Promise.all(rows.map(async (m) => {
         const { data: p } = await supabase
           .from('profiles')
@@ -216,7 +152,10 @@ const Messages: React.FC = () => {
           .eq('id', m.sender_id)
           .limit(1);
         const prof = p?.[0] ?? null;
-        return { ...m, sender_profile: prof ? { display_name: prof.display_name, avatar_url: prof.avatar_url } : undefined };
+        return {
+          ...m,
+          sender_profile: prof ? { display_name: prof.display_name, avatar_url: prof.avatar_url } : undefined,
+        };
       }));
 
       setMessages(withProfiles);
@@ -229,7 +168,7 @@ const Messages: React.FC = () => {
     }
   };
 
-  /** Send message (write to "content" only; avoid read_by inline) */
+  // Send message (writes only to "content")
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile || !selectedThread || !messageText.trim()) return;
@@ -276,7 +215,80 @@ const Messages: React.FC = () => {
       : date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   };
 
-  // === Helpers to render thread list with presence (compatible with your UI) ===
+  // Initial threads load
+  useEffect(() => {
+    if (profile) {
+      bootstrapThreads();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile]);
+
+  // Ensure + select a thread from URL (?group / ?partner) immediately
+  useEffect(() => {
+    if (!profile) return;
+    const groupId = searchParams.get('group');
+    const partnerId = searchParams.get('partner');
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        let tId: string | null = null;
+
+        if (groupId) {
+          tId = await ensureGroupThread(groupId);
+        } else if (partnerId) {
+          tId = await ensureDirectThread(partnerId);
+        }
+
+        if (tId) {
+          // fetch the exact thread and select it (no race with list refresh)
+          const { data: t, error } = await supabase
+            .from('threads')
+            .select('id,is_group,group_id,created_by,created_at,updated_at,name')
+            .eq('id', tId)
+            .single();
+          if (error) throw error;
+          if (!cancelled) setSelectedThread(t);
+          // refresh sidebar after
+          await bootstrapThreads();
+        }
+      } catch (e) {
+        console.error('Failed to select ensured thread:', e);
+      }
+    })();
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile, searchParams]);
+
+  // Load messages + realtime for selected thread
+  useEffect(() => {
+    if (!selectedThread) return;
+
+    loadMessages(selectedThread.id);
+
+    const channel = supabase
+      .channel(`messages:${selectedThread.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `thread_id=eq.${selectedThread.id}` },
+        () => { loadMessages(selectedThread.id); }
+      )
+      .subscribe();
+
+    return () => {
+      try { supabase.removeChannel(channel); } catch { /* noop */ }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedThread?.id]);
+
+  // Scroll on new messages
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  // Thread list helpers
   const getThreadName = (thread: Thread) => thread.is_group ? (thread.name || 'Group Chat') : 'Direct Chat';
   const getThreadAvatar = (thread: Thread) => (thread.is_group ? null : null);
   const filteredThreads = threads.filter(t =>
@@ -318,7 +330,7 @@ const Messages: React.FC = () => {
               <Plus className="h-5 w-5" />
             </button>
           </div>
-          
+
           {/* Search */}
           <div className="relative">
             <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
@@ -339,9 +351,6 @@ const Messages: React.FC = () => {
               {filteredThreads.map((thread) => {
                 const threadName = getThreadName(thread);
                 const threadAvatar = getThreadAvatar(thread);
-                // You used presence hooks with otherParticipant earlier;
-                // keeping a neutral presence dot here for simplicity.
-                const { status } = useOnlineStatus(null);
 
                 return (
                   <button
@@ -369,13 +378,8 @@ const Messages: React.FC = () => {
                           )}
                         </div>
                       )}
-                      <OnlineIndicator 
-                        status={status}
-                        size={8}
-                        className="absolute -bottom-1 -right-1"
-                      />
                     </div>
-                    
+
                     <div className="flex-1 text-left min-w-0">
                       <div className="flex items-center justify-between">
                         <h3 className="font-medium text-gray-900 truncate">{threadName}</h3>
@@ -383,7 +387,7 @@ const Messages: React.FC = () => {
                           {formatMessageTime(thread.updated_at)}
                         </span>
                       </div>
-                      {/* last_message display omitted here (needs a separate safe query/RPC) */}
+                      {/* last_message preview omitted to avoid joins */}
                     </div>
                   </button>
                 );
@@ -423,7 +427,7 @@ const Messages: React.FC = () => {
                   </h2>
                 </div>
               </div>
-              
+
               <div className="flex items-center space-x-2">
                 <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
                   <Phone className="h-5 w-5" />
