@@ -1,275 +1,492 @@
-import { createClient } from '@supabase/supabase-js';
-import { BUCKETS, type BucketKey } from './buckets';
+import React, { useState, useEffect, useRef } from 'react';
+import { useAuth } from '../../lib/auth';
+import { supabase } from '../../lib/supabase';
+import { 
+  Send, Smile, Paperclip, MoreHorizontal, Users, 
+  Crown, Shield, UserMinus, Settings, X
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import toast from 'react-hot-toast';
+import OnlineIndicator from '../UI/OnlineIndicator';
+import TypingIndicator from '../UI/TypingIndicator';
+import MessageReactions from '../Messages/MessageReactions';
+import { useTypingIndicator } from '../../hooks/useTypingIndicator';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseKey || 
-    supabaseUrl.includes('YOUR_PROJECT') || 
-    supabaseKey.includes('YOUR_ANON_KEY')) {
-  throw new Error(
-    'Missing or invalid Supabase environment variables. Please check your .env.local file and ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set with your actual Supabase project credentials.'
-  );
+interface GroupChatProps {
+  groupId: string;
+  groupName: string;
+  userRole: 'owner' | 'admin' | 'member';
 }
 
-if (!supabaseUrl || !supabaseKey) {
-  throw new Error(
-    'Missing Supabase environment variables. Please check your .env.local file and ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set with your actual Supabase project credentials.'
-  );
-}
-
-export const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-  },
-  global: {
-    headers: {
-      apikey: supabaseKey, // belt-and-suspenders; supabase-js adds this too
-    },
-  },
-});
-
-// Optional: a tiny helper when you really must call PostgREST directly.
-// Always use this instead of raw fetch to avoid "No API key found".
-export async function pgFetch(path: string, init?: RequestInit) {
-  const jwt = (await supabase.auth.getSession()).data.session?.access_token;
-  const url = `${supabaseUrl}/rest/v1/${path}`;
-  return fetch(url, {
-    ...init,
-    headers: {
-      apikey: supabaseKey,
-      Authorization: `Bearer ${jwt ?? supabaseKey}`,
-      ...(init?.headers || {}),
-    },
-  });
-}
-
-// Types
-export interface Profile {
+interface GroupMessage {
   id: string;
-  email: string;
-  display_name: string;
-  bio?: string;
-  avatar_url?: string;
-  role: 'user' | 'admin' | 'super_admin';
-  profile_visibility: 'public' | 'friends' | 'private';
-  default_post_visibility: 'public' | 'friends' | 'private';
-  allow_messages_from: 'public' | 'friends' | 'private';
-  created_at: string;
-}
-
-export interface Pet {
-  id: string;
-  owner_id: string;
-  name: string;
-  species: 'dog' | 'cat' | 'bird' | 'rabbit' | 'hamster' | 'fish' | 'reptile' | 'other';
-  breed?: string;
-  date_of_birth?: string;
-  gender?: string;
-  weight?: number;
-  color?: string;
-  photo_url?: string;
-  bio?: string;
-  visibility: 'public' | 'friends' | 'private';
-  is_lost: boolean;
-  created_at: string;
-}
-
-export interface Post {
-  id: string;
-  author_id: string;
+  thread_id: string;
+  sender_id: string;
   content: string;
-  media_urls: string[];
-  visibility: 'public' | 'friends' | 'private';
-  group_id?: string;
-  pet_id?: string;
-  likes_count: number;
-  comments_count: number;
-  shares_count: number;
   created_at: string;
-  profiles?: Profile;
-  pets?: Pet;
+  profiles: {
+    display_name: string;
+    avatar_url?: string;
+  };
+  reactions?: Array<{
+    id: string;
+    user_id: string;
+    emoji: string;
+    created_at: string;
+  }>;
 }
 
-export interface HealthRecord {
-  id: string;
-  pet_id: string;
-  type: 'checkup' | 'vaccination' | 'medication' | 'surgery' | 'emergency' | 'symptom' | 'other';
-  title: string;
-  description?: string;
-  date: string;
-  veterinarian?: string;
-  cost?: number;
-  attachment_url?: string;
-  symptom_analysis?: any;
-  created_at: string;
-}
-
-export interface LostFound {
-  id: string;
-  reporter_id: string;
-  status: 'lost' | 'found' | 'resolved';
-  pet_name: string;
-  species: string;
-  breed?: string;
-  description: string;
-  photo_url?: string;
-  last_seen_location: string;
-  latitude: number;
-  longitude: number;
-  contact_phone?: string;
-  contact_email?: string;
-  reward_offered: boolean;
-  reward_amount?: number;
-  is_resolved: boolean;
-  created_at: string;
-}
-
-export interface PushSubscription {
+interface GroupMember {
   id: string;
   user_id: string;
-  endpoint: string;
-  p256dh: string;
-  auth: string;
-  created_at: string;
+  role: string;
+  joined_at: string;
+  profiles: {
+    display_name: string;
+    avatar_url?: string;
+  };
 }
 
-export interface UserPresence {
-  user_id: string;
-  last_seen_at: string;
-  status: 'online' | 'away' | 'offline';
-}
+const GroupChat: React.FC<GroupChatProps> = ({ groupId, groupName, userRole }) => {
+  const { profile } = useAuth();
+  const [messages, setMessages] = useState<GroupMessage[]>([]);
+  const [members, setMembers] = useState<GroupMember[]>([]);
+  const [messageText, setMessageText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
-export interface MessageAttachment {
-  id: string;
-  message_id: string;
-  file_path: string;
-  mime_type: string;
-  size_bytes: number;
-  created_at: string;
-}
+  // Typing indicator
+  const { typingUsers, handleTyping, stopTyping } = useTypingIndicator(threadId || '');
 
-export interface ActivityFeedItem {
-  id: string;
-  actor_id: string;
-  subject_user_id: string;
-  verb: string;
-  object_type: string;
-  object_id?: string;
-  visibility: 'public' | 'followers' | 'friends' | 'private' | 'custom';
-  created_at: string;
-  actor_profile?: Profile;
-}
+  useEffect(() => {
+    if (profile && groupId) {
+      initializeGroupChat();
+    }
+  }, [profile, groupId]);
 
-export interface PrivacyRule {
-  id: string;
-  owner_id: string;
-  scope: string;
-  rule: string;
-  created_at: string;
-}
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
-export interface PrivacyRuleOverride {
-  id: string;
-  rule_id: string;
-  target_user_id: string;
-  allow: boolean;
-}
+  const initializeGroupChat = async () => {
+    try {
+      // Find or create group thread
+      const { data: existingThread, error: findErr } = await supabase
+        .from('threads')
+        .select('id')
+        .eq('is_group', true)
+        .eq('group_id', groupId)
+        .limit(1);
 
-export interface AppEvent {
-  id: number;
-  user_id?: string;
-  event: string;
-  meta?: Record<string, any>;
-  occurred_at: string;
-}
+      if (findErr) {
+        console.error('Error checking for existing thread:', findErr);
+        toast.error('Failed to initialize group chat');
+        return;
+      }
 
-// Auth helpers
-export const getCurrentUser = async () => {
-  const { data: { user } } = await supabase.auth.getUser();
-  return user;
-};
+      const threadRecord = Array.isArray(existingThread) ? existingThread[0] : null;
+      let currentThreadId = threadRecord?.id;
 
-export const getCurrentProfile = async () => {
-  const user = await getCurrentUser();
-  if (!user) return null;
-  
-  const { data } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .limit(1);
-    
-  return data?.[0] || null;
-};
+      if (!currentThreadId) {
+        // Create new group thread
+        const { data: newThread, error: threadError } = await supabase
+          .from('threads')
+          .insert({
+            is_group: true,
+            created_by: profile?.id,
+            name: groupName || 'Group Chat'
+          })
+          .select()
+          .limit(1);
 
-// Storage helpers
-export const uploadFile = async (
-  bucketKey: BucketKey,
-  filename: string,
-  file: File
-): Promise<string | null> => {
-  const user = await getCurrentUser();
-  if (!user) {
-    console.error('User not authenticated for file upload');
-    return null;
+        if (threadError) {
+          console.error('Error creating group thread:', threadError);
+          toast.error('Failed to initialize group chat');
+          return;
+        }
+
+        const newThreadRecord = Array.isArray(newThread) ? newThread[0] : null;
+        if (!newThreadRecord) {
+          console.error('No thread returned after creation');
+          toast.error('Failed to initialize group chat');
+          return;
+        }
+        
+        currentThreadId = newThreadRecord.id;
+
+        // Ensure the current user is a participant (use upsert to avoid duplicates)
+        const { error: participantError } = await supabase
+          .from('thread_participants')
+          .upsert({
+            thread_id: currentThreadId,
+            user_id: profile?.id
+          }, { onConflict: 'thread_id,user_id' });
+
+        if (participantError) {
+          console.error('Error adding user as participant:', participantError);
+          // Don't fail completely, just log the error
+        }
+
+        // Add other group members as thread participants
+        const { data: groupMembers } = await supabase
+          .from('group_members')
+          .select('user_id')
+          .eq('group_id', groupId);
+
+        if (groupMembers && groupMembers.length > 0) {
+          const participants = groupMembers
+            .filter(member => member.user_id !== profile?.id)
+            .map(member => ({
+              thread_id: currentThreadId,
+              user_id: member.user_id
+            }));
+
+          if (participants.length > 0) {
+            const { error: bulkParticipantError } = await supabase
+              .from('thread_participants')
+              .upsert(participants, { onConflict: 'thread_id,user_id' });
+            
+            if (bulkParticipantError) {
+              console.error('Error adding group members as participants:', bulkParticipantError);
+              // Don't fail completely, just log the error
+            }
+          }
+        }
+      }
+
+      setThreadId(currentThreadId);
+      loadMessages(currentThreadId);
+      loadMembers();
+    } catch (error) {
+      console.error('Error initializing group chat:', error);
+      toast.error('Failed to load group chat');
+      setLoading(false);
+    }
+  };
+
+  const loadMessages = async (threadId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select(`
+          *,
+          profiles!messages_sender_id_fkey(display_name, avatar_url),
+          message_reactions(id, user_id, emoji, created_at)
+        `)
+        .eq('thread_id', threadId)
+        .order('created_at', { ascending: true })
+        .limit(100);
+
+      if (error) {
+        console.error('Error loading messages:', error);
+      } else {
+        setMessages(data || []);
+      }
+    } catch (error) {
+      console.error('Error loading messages:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadMembers = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('group_members')
+        .select(`
+          *,
+          profiles!group_members_user_id_fkey(display_name, avatar_url)
+        `)
+        .eq('group_id', groupId)
+        .order('joined_at', { ascending: true });
+
+      if (error) {
+        console.error('Error loading members:', error);
+      } else {
+        setMembers(data || []);
+      }
+    } catch (error) {
+      console.error('Error loading members:', error);
+    }
+  };
+
+  const sendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile || !threadId || !messageText.trim()) return;
+
+    setSendingMessage(true);
+    stopTyping();
+
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .insert({
+          thread_id: threadId,
+          sender_id: profile.id,
+          content: messageText.trim(),
+          read_by: [profile.id]
+        });
+
+      if (error) {
+        toast.error('Failed to send message');
+        console.error('Error sending message:', error);
+      } else {
+        setMessageText('');
+        loadMessages(threadId);
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+      toast.error('Failed to send message');
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const formatMessageTime = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
+
+    if (diffInHours < 24) {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } else {
+      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    }
+  };
+
+  const getRoleIcon = (role: string) => {
+    switch (role) {
+      case 'owner': return Crown;
+      case 'admin': return Shield;
+      default: return Users;
+    }
+  };
+
+  const getRoleColor = (role: string) => {
+    switch (role) {
+      case 'owner': return 'text-yellow-500';
+      case 'admin': return 'text-blue-500';
+      default: return 'text-gray-500';
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="h-96 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
   }
 
-  // Enforce path-based ownership: userId/filename
-  const safePath = `${user.id}/${filename}`;
-  const bucket = BUCKETS[bucketKey];
+  return (
+    <div className="h-96 flex flex-col bg-white rounded-lg shadow-md overflow-hidden">
+      {/* Chat Header */}
+      <div className="flex items-center justify-between p-4 border-b border-gray-200">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
+            <Users className="h-5 w-5 text-white" />
+          </div>
+          <div>
+            <h3 className="font-semibold text-gray-900">{groupName}</h3>
+            <p className="text-sm text-gray-600">{members.length} members</p>
+          </div>
+        </div>
+        
+        <button
+          onClick={() => setShowMembers(!showMembers)}
+          className="p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+        >
+          <Users className="h-5 w-5" />
+        </button>
+      </div>
 
-  const { data, error } = await supabase.storage
-    .from(bucket)
-    .upload(safePath, file, {
-      cacheControl: '3600',
-      upsert: false
-    });
+      <div className="flex flex-1 min-h-0">
+        {/* Messages Area */}
+        <div className="flex-1 flex flex-col">
+          {/* Messages List */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {messages.length > 0 ? (
+              <>
+                {messages.map((message, index) => {
+                  const isOwnMessage = message.sender_id === profile?.id;
+                  const showAvatar = index === 0 || 
+                    messages[index - 1].sender_id !== message.sender_id;
+                  
+                  return (
+                    <motion.div
+                      key={message.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div className={`flex space-x-2 max-w-xs ${isOwnMessage ? 'flex-row-reverse space-x-reverse' : ''}`}>
+                        {showAvatar && !isOwnMessage && (
+                          <div className="flex-shrink-0">
+                            {message.profiles.avatar_url ? (
+                              <img
+                                src={message.profiles.avatar_url}
+                                alt={message.profiles.display_name}
+                                className="w-8 h-8 rounded-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center">
+                                <Users className="h-4 w-4 text-gray-600" />
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        <div className={`flex flex-col ${isOwnMessage ? 'items-end' : 'items-start'}`}>
+                          {showAvatar && !isOwnMessage && (
+                            <span className="text-xs text-gray-500 mb-1">
+                              {message.profiles.display_name}
+                            </span>
+                          )}
+                          
+                          <div className={`rounded-lg px-3 py-2 ${
+                            isOwnMessage 
+                              ? 'bg-blue-600 text-white' 
+                              : 'bg-gray-100 text-gray-900'
+                          }`}>
+                            <p className="text-sm">{message.content}</p>
+                          </div>
+                          
+                          <div className="flex items-center space-x-2 mt-1">
+                            <span className="text-xs text-gray-500">
+                              {formatMessageTime(message.created_at)}
+                            </span>
+                            
+                            <MessageReactions
+                              messageId={message.id}
+                              reactions={message.reactions || []}
+                              onUpdate={() => threadId && loadMessages(threadId)}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+                <div ref={messagesEndRef} />
+              </>
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <Users className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">Welcome to {groupName}!</h3>
+                  <p className="text-gray-600">Start the conversation with your group members</p>
+                </div>
+              </div>
+            )}
+          </div>
 
-  if (error) {
-    console.error('Upload error:', error);
-    return null;
-  }
+          {/* Typing Indicator */}
+          <div className="px-4">
+            <TypingIndicator users={typingUsers} className="mb-2" />
+          </div>
 
-  const { data: { publicUrl } } = supabase.storage
-    .from(bucket)
-    .getPublicUrl(data.path);
+          {/* Message Input */}
+          <div className="p-4 border-t border-gray-200">
+            <form onSubmit={sendMessage} className="flex items-center space-x-3">
+              <div className="flex-1">
+                <input
+                  type="text"
+                  value={messageText}
+                  onChange={(e) => {
+                    setMessageText(e.target.value);
+                    handleTyping();
+                  }}
+                  onBlur={stopTyping}
+                  placeholder={`Message ${groupName}...`}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  disabled={sendingMessage}
+                />
+              </div>
+              
+              <button
+                type="submit"
+                disabled={!messageText.trim() || sendingMessage}
+                className="p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <Send className="h-4 w-4" />
+              </button>
+            </form>
+          </div>
+        </div>
 
-  return publicUrl;
+        {/* Members Sidebar */}
+        <AnimatePresence>
+          {showMembers && (
+            <motion.div
+              initial={{ width: 0, opacity: 0 }}
+              animate={{ width: 200, opacity: 1 }}
+              exit={{ width: 0, opacity: 0 }}
+              className="border-l border-gray-200 bg-gray-50 overflow-hidden"
+            >
+              <div className="p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="font-semibold text-gray-900">Members</h4>
+                  <button
+                    onClick={() => setShowMembers(false)}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                
+                <div className="space-y-3 max-h-80 overflow-y-auto">
+                  {members.map((member) => {
+                    const RoleIcon = getRoleIcon(member.role);
+                    const roleColor = getRoleColor(member.role);
+                    
+                    return (
+                      <div key={member.id} className="flex items-center space-x-2">
+                        <div className="relative">
+                          {member.profiles.avatar_url ? (
+                            <img
+                              src={member.profiles.avatar_url}
+                              alt={member.profiles.display_name}
+                              className="w-8 h-8 rounded-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center">
+                              <Users className="h-4 w-4 text-gray-600" />
+                            </div>
+                          )}
+                          <OnlineIndicator 
+                            status="offline" // Would need to implement presence for group members
+                            size={6}
+                            className="absolute -bottom-1 -right-1"
+                          />
+                        </div>
+                        
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center space-x-1">
+                            <p className="text-sm font-medium text-gray-900 truncate">
+                              {member.profiles.display_name}
+                            </p>
+                            <RoleIcon className={`h-3 w-3 ${roleColor}`} />
+                          </div>
+                          <p className="text-xs text-gray-500 capitalize">{member.role}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
 };
 
-export const deleteFile = async (bucketKey: BucketKey, path: string) => {
-  const bucket = BUCKETS[bucketKey];
-  const { error } = await supabase.storage
-    .from(bucket)
-    .remove([path]);
-
-  if (error) {
-    console.error('Delete error:', error);
-  }
-};
-
-// Realtime helpers
-export const subscribeToPresence = (channel: string, callback: (payload: any) => void) => {
-  const presence = supabase.channel(channel)
-    .on('presence', { event: '*' }, callback)
-    .subscribe();
-    
-  return presence;
-};
-
-export const subscribeToMessages = (threadId: string, callback: (payload: any) => void) => {
-  const subscription = supabase
-    .channel(`messages:${threadId}`)
-    .on('postgres_changes', {
-      event: 'INSERT',
-      schema: 'public',
-      table: 'messages',
-      filter: `thread_id=eq.${threadId}`
-    }, callback)
-    .subscribe();
-    
-  return subscription;
-};
+export default GroupChat;
