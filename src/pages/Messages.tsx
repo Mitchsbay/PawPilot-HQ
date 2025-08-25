@@ -2,11 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
-import { isInThread } from '../lib/membership';
-import { firstRow } from '@/lib/firstRow';
 import { 
   MessageCircle, Plus, Search, Phone, Video, MoreHorizontal,
-  Send, Paperclip, Smile, User, Users, Settings, X, Image
+  Send, Paperclip, Smile, User, Users, Image
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
@@ -17,39 +15,27 @@ import MessageAttachments from '../components/Messages/MessageAttachments';
 import { useTypingIndicator } from '../hooks/useTypingIndicator';
 import { useOnlineStatus } from '../hooks/useOnlineStatus';
 
-interface Thread {
+type Thread = {
   id: string;
-  name?: string;
+  name?: string | null;
   is_group: boolean;
-  created_by?: string;
-  created_at: string;
-  updated_at: string;
-  participants?: Array<{
-    user_id: string;
-    profiles: {
-      display_name: string;
-      avatar_url?: string;
-    };
-  }>;
-  last_message?: {
-    content: string;
-    created_at: string;
-    sender_id: string;
-  };
-  unread_count?: number;
-}
+  created_by: string;
+  created_at: string | null;
+  updated_at: string | null;
+};
 
-interface Message {
+type Message = {
   id: string;
   thread_id: string;
   sender_id: string;
-  content: string;
-  media_url?: string;
-  read_by: string[];
-  created_at: string;
+  content: string | null;
+  created_at: string | null;
+  // keep optional fields for UI compatibility
+  media_url?: string | null;
+  read_by?: string[] | null;
   sender_profile?: {
     display_name: string;
-    avatar_url?: string;
+    avatar_url?: string | null;
   };
   reactions?: Array<{
     id: string;
@@ -63,11 +49,12 @@ interface Message {
     mime_type: string;
     size_bytes: number;
   }>;
-}
+};
 
 const Messages: React.FC = () => {
   const { profile } = useAuth();
   const [searchParams] = useSearchParams();
+
   const [threads, setThreads] = useState<Thread[]>([]);
   const [selectedThread, setSelectedThread] = useState<Thread | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -84,152 +71,157 @@ const Messages: React.FC = () => {
   // Debounced stop typing
   const stopTypingTimeoutRef = useRef<NodeJS.Timeout>();
   const debouncedStopTyping = () => {
-    if (stopTypingTimeoutRef.current) {
-      clearTimeout(stopTypingTimeoutRef.current);
-    }
-    stopTypingTimeoutRef.current = setTimeout(() => {
-      stopTyping();
-    }, 1200);
+    if (stopTypingTimeoutRef.current) clearTimeout(stopTypingTimeoutRef.current);
+    stopTypingTimeoutRef.current = setTimeout(() => stopTyping(), 1200);
   };
 
   useEffect(() => {
     if (profile) {
-      loadThreads();
+      bootstrapThreads();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
+  // If ?group or ?partner is in the URL, ensure a thread exists, then select it.
   useEffect(() => {
+    if (!profile || threads.length === 0) return;
     const groupId = searchParams.get('group');
-    if (groupId && threads.length > 0) {
-      // Find or create group thread
-      const groupThread = threads.find(t => t.is_group && t.name?.includes('Group'));
-      if (groupThread) {
-        setSelectedThread(groupThread);
+    const partnerId = searchParams.get('partner');
+
+    (async () => {
+      try {
+        if (groupId) {
+          const tId = await ensureGroupThread(groupId);
+          const t = threads.find(t => t.id === tId) ?? null;
+          setSelectedThread(t);
+        } else if (partnerId) {
+          const tId = await ensureDirectThread(partnerId);
+          const t = threads.find(t => t.id === tId) ?? null;
+          setSelectedThread(t);
+        }
+      } catch (e) {
+        console.error(e);
       }
-    }
-  }, [searchParams, threads]);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, threads, profile]);
 
   useEffect(() => {
-    if (selectedThread) {
-      loadMessages(selectedThread.id);
-      
-      // Set up real-time subscription for new messages
-      const subscription = supabase
-        .channel(`messages:${selectedThread.id}`)
-        .on('postgres_changes', {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `thread_id=eq.${selectedThread.id}`
-        }, (payload) => {
-          loadMessages(selectedThread.id);
-        })
-        .subscribe();
+    if (!selectedThread) return;
 
-      return () => {
-        supabase.removeChannel(subscription);
-      };
-    }
+    loadMessages(selectedThread.id);
+
+    // realtime
+    const subscription = supabase
+      .channel(`messages:${selectedThread.id}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `thread_id=eq.${selectedThread.id}`
+      }, () => {
+        // fetch latest; could be optimized by appending payload.new
+        loadMessages(selectedThread.id);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(subscription);
+    };
   }, [selectedThread]);
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
-  const loadThreads = async () => {
-    if (!profile) return;
+  /** Ensure we’re signed in (so RLS sees auth.uid()) */
+  async function requireSession() {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    if (!session?.access_token) throw new Error('Not signed in');
+    return session;
+  }
 
+  /** Load all accessible threads (narrow select, no '*', no implicit joins) */
+  const bootstrapThreads = async () => {
+    setLoading(true);
     try {
-      // Load threads where user is a participant
-      const { data: participantData, error: participantError } = await supabase
-        .from('thread_participants')
-        .select('thread_id')
-        .eq('user_id', profile.id);
+      await requireSession();
+      const { data, error } = await supabase
+        .from('threads')
+        .select('id,is_group,group_id,created_by,created_at,updated_at,name')
+        .order('updated_at', { ascending: false, nullsFirst: false })
+        .limit(200);
 
-      if (participantError) {
-        console.error('Error loading thread participants:', participantError);
-        setThreads([]);
-      } else {
-        const threadIds = participantData?.map(tp => tp.thread_id) || [];
-        
-        if (threadIds.length === 0) {
-          setThreads([]);
-        } else {
-          // Load thread details
-          const { data: threadsData, error: threadsError } = await supabase
-            .from('threads')
-            .select('*')
-            .in('id', threadIds)
-            .order('updated_at', { ascending: false });
-
-          if (threadsError) {
-            console.error('Error loading threads:', threadsError);
-            setThreads([]);
-          } else {
-            setThreads(threadsData || []);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error loading threads:', error);
+      if (error) throw error;
+      setThreads(data || []);
+    } catch (err) {
+      console.error('Error loading threads:', err);
       setThreads([]);
     } finally {
       setLoading(false);
     }
   };
 
+  /** Ensure a group thread exists via RPC; return its id. */
+  async function ensureGroupThread(groupId: string): Promise<string> {
+    await requireSession();
+    const { data, error } = await supabase.rpc('chat_init_group', { p_group_id: groupId });
+    if (error) {
+      toast.error('Failed to initialise group chat');
+      throw error;
+    }
+    const tId = data?.[0]?.thread_id as string | undefined;
+    if (!tId) throw new Error('chat_init_group returned no thread_id');
+    // refresh thread list to include it
+    await bootstrapThreads();
+    return tId;
+  }
+
+  /** Ensure a direct thread exists via RPC; return its id. */
+  async function ensureDirectThread(partnerUserId: string): Promise<string> {
+    await requireSession();
+    const { data, error } = await supabase.rpc('chat_init_direct', { p_partner: partnerUserId });
+    if (error) {
+      toast.error('Failed to initialise direct chat');
+      throw error;
+    }
+    const tId = data?.[0]?.thread_id as string | undefined;
+    if (!tId) throw new Error('chat_init_direct returned no thread_id');
+    await bootstrapThreads();
+    return tId;
+  }
+
+  /** Load messages (narrow select); then N+1 fetch minimal sender profiles */
   const loadMessages = async (threadId: string) => {
     setLoadingMessages(true);
-
     try {
-      // Load messages without complex joins to avoid policy recursion
+      await requireSession();
       const { data, error } = await supabase
         .from('messages')
-        .select('*')
+        .select('id,thread_id,sender_id,content,created_at,read_by,media_url')
         .eq('thread_id', threadId)
-        .order('created_at', { ascending: true });
+        .order('created_at', { ascending: true })
+        .limit(500);
 
-      if (error) {
-        console.error('Error loading messages:', error);
-        toast.error('Failed to load messages');
-        setMessages([]);
-      } else {
-        // Load sender profiles separately to avoid join issues
-        const messagesWithProfiles = await Promise.all(
-          (data || []).map(async (message) => {
-            const { data: senderProfile, error: profileError } = await supabase
-              .from('profiles')
-              .select('display_name, avatar_url')
-              .eq('id', message.sender_id)
-              .limit(1);
+      if (error) throw error;
 
-            const profile = firstRow(senderProfile);
-            return {
-              ...message,
-              sender_profile: profile || { display_name: 'Unknown User', avatar_url: null },
-              reactions: [],
-              attachments: []
-            };
-          })
-        );
-        setMessages(messagesWithProfiles);
+      const rows = (data || []) as Message[];
 
-        // Mark messages as read
-        const unreadMessageIds = messagesWithProfiles
-          .filter(m => !m.read_by.includes(profile?.id || ''))
-          .map(m => m.id);
+      // fetch sender profiles (minimal)
+      const withProfiles = await Promise.all(rows.map(async (m) => {
+        const { data: p } = await supabase
+          .from('profiles')
+          .select('display_name,avatar_url')
+          .eq('id', m.sender_id)
+          .limit(1);
+        const prof = p?.[0] ?? null;
+        return { ...m, sender_profile: prof ? { display_name: prof.display_name, avatar_url: prof.avatar_url } : undefined };
+      }));
 
-        if (unreadMessageIds.length > 0) {
-          await supabase
-            .from('messages')
-            .update({ 
-              read_by: [...(messagesWithProfiles[0]?.read_by || []), profile?.id].filter(Boolean)
-            })
-            .in('id', unreadMessageIds);
-        }
-      }
-    } catch (error) {
-      console.error('Error loading messages:', error);
+      setMessages(withProfiles);
+    } catch (err) {
+      console.error('Error loading messages:', err);
       toast.error('Failed to load messages');
       setMessages([]);
     } finally {
@@ -237,7 +229,7 @@ const Messages: React.FC = () => {
     }
   };
 
-
+  /** Send message (write to "content" only; avoid read_by inline) */
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile || !selectedThread || !messageText.trim()) return;
@@ -246,13 +238,13 @@ const Messages: React.FC = () => {
     stopTyping();
 
     try {
+      await requireSession();
       const { error } = await supabase
         .from('messages')
         .insert({
           thread_id: selectedThread.id,
           sender_id: profile.id,
           content: messageText.trim(),
-          read_by: [profile.id]
         });
 
       if (error) {
@@ -260,10 +252,10 @@ const Messages: React.FC = () => {
         console.error('Error sending message:', error);
       } else {
         setMessageText('');
-        loadMessages(selectedThread.id);
+        await loadMessages(selectedThread.id);
       }
-    } catch (error) {
-      console.error('Error sending message:', error);
+    } catch (err) {
+      console.error('Error sending message:', err);
       toast.error('Failed to send message');
     } finally {
       setSendingMessage(false);
@@ -274,44 +266,21 @@ const Messages: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const formatMessageTime = (dateString: string) => {
+  const formatMessageTime = (dateString: string | null) => {
+    if (!dateString) return '';
     const date = new Date(dateString);
     const now = new Date();
     const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
-
-    if (diffInHours < 24) {
-      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } else {
-      return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-    }
+    return diffInHours < 24
+      ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   };
 
-  const getThreadName = (thread: Thread) => {
-    if (thread.is_group) {
-      return thread.name || 'Group Chat';
-    } else {
-      const otherParticipant = thread.participants?.find(p => p.user_id !== profile?.id);
-      return otherParticipant?.profiles.display_name || 'Unknown User';
-    }
-  };
-
-  const getThreadAvatar = (thread: Thread) => {
-    if (thread.is_group) {
-      return null; // Groups don't have avatars in this simple implementation
-    } else {
-      const otherParticipant = thread.participants?.find(p => p.user_id !== profile?.id);
-      return otherParticipant?.profiles.avatar_url;
-    }
-  };
-
-  const getOtherParticipantId = (thread: Thread) => {
-    if (thread.is_group) return null;
-    const otherParticipant = thread.participants?.find(p => p.user_id !== profile?.id);
-    return otherParticipant?.user_id;
-  };
-
-  const filteredThreads = threads.filter(thread =>
-    getThreadName(thread).toLowerCase().includes(searchTerm.toLowerCase())
+  // === Helpers to render thread list with presence (compatible with your UI) ===
+  const getThreadName = (thread: Thread) => thread.is_group ? (thread.name || 'Group Chat') : 'Direct Chat';
+  const getThreadAvatar = (thread: Thread) => (thread.is_group ? null : null);
+  const filteredThreads = threads.filter(t =>
+    getThreadName(t).toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   if (loading) {
@@ -370,9 +339,10 @@ const Messages: React.FC = () => {
               {filteredThreads.map((thread) => {
                 const threadName = getThreadName(thread);
                 const threadAvatar = getThreadAvatar(thread);
-                const otherParticipantId = getOtherParticipantId(thread);
-                const { status } = useOnlineStatus(otherParticipantId);
-                
+                // You used presence hooks with otherParticipant earlier;
+                // keeping a neutral presence dot here for simplicity.
+                const { status } = useOnlineStatus(null);
+
                 return (
                   <button
                     key={thread.id}
@@ -399,36 +369,22 @@ const Messages: React.FC = () => {
                           )}
                         </div>
                       )}
-                      {!thread.is_group && otherParticipantId && (
-                        <OnlineIndicator 
-                          status={status}
-                          size={8}
-                          className="absolute -bottom-1 -right-1"
-                        />
-                      )}
+                      <OnlineIndicator 
+                        status={status}
+                        size={8}
+                        className="absolute -bottom-1 -right-1"
+                      />
                     </div>
                     
                     <div className="flex-1 text-left min-w-0">
                       <div className="flex items-center justify-between">
                         <h3 className="font-medium text-gray-900 truncate">{threadName}</h3>
-                        {thread.last_message && (
-                          <span className="text-xs text-gray-500">
-                            {formatMessageTime(thread.last_message.created_at)}
-                          </span>
-                        )}
+                        <span className="text-xs text-gray-500">
+                          {formatMessageTime(thread.updated_at)}
+                        </span>
                       </div>
-                      {thread.last_message && (
-                        <p className="text-sm text-gray-600 truncate">
-                          {thread.last_message.content}
-                        </p>
-                      )}
+                      {/* last_message display omitted here (needs a separate safe query/RPC) */}
                     </div>
-                    
-                    {thread.unread_count && thread.unread_count > 0 && (
-                      <div className="bg-blue-600 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                        {thread.unread_count > 99 ? '99+' : thread.unread_count}
-                      </div>
-                    )}
                   </button>
                 );
               })}
@@ -438,7 +394,7 @@ const Messages: React.FC = () => {
               <MessageCircle className="h-12 w-12 text-gray-300 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">No conversations</h3>
               <p className="text-gray-600">
-                {searchTerm ? 'No conversations match your search' : 'Start a conversation with someone!'}
+                {searchTerm ? 'No conversations match your search' : 'Start a conversation!'}
               </p>
             </div>
           )}
@@ -453,38 +409,18 @@ const Messages: React.FC = () => {
             <div className="flex items-center justify-between p-4 border-b border-gray-200">
               <div className="flex items-center space-x-3">
                 <div className="relative">
-                  {getThreadAvatar(selectedThread) ? (
-                    <img
-                      src={getThreadAvatar(selectedThread)!}
-                      alt={getThreadName(selectedThread)}
-                      className="w-10 h-10 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center">
-                      {selectedThread.is_group ? (
-                        <Users className="h-5 w-5 text-gray-600" />
-                      ) : (
-                        <User className="h-5 w-5 text-gray-600" />
-                      )}
-                    </div>
-                  )}
-                  {!selectedThread.is_group && getOtherParticipantId(selectedThread) && (
-                    <OnlineIndicator 
-                      status={useOnlineStatus(getOtherParticipantId(selectedThread)!).status}
-                      lastSeen={useOnlineStatus(getOtherParticipantId(selectedThread)!).lastSeen}
-                      size={8}
-                      className="absolute -bottom-1 -right-1"
-                    />
-                  )}
+                  <div className="w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center">
+                    {selectedThread.is_group ? (
+                      <Users className="h-5 w-5 text-gray-600" />
+                    ) : (
+                      <User className="h-5 w-5 text-gray-600" />
+                    )}
+                  </div>
                 </div>
                 <div>
-                  <h2 className="font-semibold text-gray-900">{getThreadName(selectedThread)}</h2>
-                  {!selectedThread.is_group && getOtherParticipantId(selectedThread) && (
-                    <p className="text-sm text-gray-500">
-                      {useOnlineStatus(getOtherParticipantId(selectedThread)!).status === 'online' ? 'Online' : 
-                       useOnlineStatus(getOtherParticipantId(selectedThread)!).status === 'away' ? 'Away' : 'Offline'}
-                    </p>
-                  )}
+                  <h2 className="font-semibold text-gray-900">
+                    {getThreadName(selectedThread)}
+                  </h2>
                 </div>
               </div>
               
@@ -511,11 +447,8 @@ const Messages: React.FC = () => {
                 <>
                   {messages.map((message, index) => {
                     const isOwnMessage = message.sender_id === profile?.id;
-                    const showAvatar = !isOwnMessage && (
-                      index === 0 || 
-                      messages[index - 1].sender_id !== message.sender_id
-                    );
-                    
+                    const showAvatar = !isOwnMessage && (index === 0 || messages[index - 1].sender_id !== message.sender_id);
+
                     return (
                       <motion.div
                         key={message.id}
@@ -529,7 +462,7 @@ const Messages: React.FC = () => {
                               {message.sender_profile?.avatar_url ? (
                                 <img
                                   src={message.sender_profile.avatar_url}
-                                  alt={message.sender_profile.display_name}
+                                  alt={message.sender_profile.display_name || 'User'}
                                   className="w-8 h-8 rounded-full object-cover"
                                 />
                               ) : (
@@ -539,53 +472,36 @@ const Messages: React.FC = () => {
                               )}
                             </div>
                           )}
-                          
+
                           <div className={`flex flex-col ${isOwnMessage ? 'items-end' : 'items-start'}`}>
                             {showAvatar && !isOwnMessage && (
                               <span className="text-xs text-gray-500 mb-1">
                                 {message.sender_profile?.display_name}
                               </span>
                             )}
-                            
-                            <div className={`rounded-lg px-3 py-2 ${
-                              isOwnMessage 
-                                ? 'bg-blue-600 text-white' 
-                                : 'bg-gray-100 text-gray-900'
-                            }`}>
+
+                            <div className={`rounded-lg px-3 py-2 ${isOwnMessage ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-900'}`}>
                               <p className="text-sm">{message.content}</p>
-                              
-                              {/* Message Attachments */}
+
+                              {/* Attachments (if you keep them) */}
                               {message.attachments && message.attachments.length > 0 && (
                                 <div className="mt-2">
-                                  <MessageAttachments
-                                    messageId={message.id}
-                                    attachments={message.attachments}
-                                  />
+                                  <MessageAttachments messageId={message.id} attachments={message.attachments} />
                                 </div>
                               )}
                             </div>
-                            
+
                             <div className="flex items-center space-x-2 mt-1">
                               <span className="text-xs text-gray-500">
                                 {formatMessageTime(message.created_at)}
                               </span>
-                              
-                              {/* Message Reactions */}
+
+                              {/* Reactions */}
                               <MessageReactions
                                 messageId={message.id}
                                 reactions={message.reactions || []}
-                                onUpdate={() => loadMessages(selectedThread.id)}
+                                onUpdate={() => selectedThread && loadMessages(selectedThread.id)}
                               />
-                              
-                              {/* Message Attachments */}
-                              {message.attachments && message.attachments.length > 0 && (
-                                <div className="mt-2">
-                                  <MessageAttachments
-                                    messageId={message.id}
-                                    attachments={message.attachments}
-                                  />
-                                </div>
-                              )}
                             </div>
                           </div>
                         </div>
@@ -610,30 +526,20 @@ const Messages: React.FC = () => {
               <TypingIndicator users={typingUsers} className="mb-2" />
             </div>
 
-            {/* Message Composer */}
+            {/* Composer */}
             <div className="p-4 border-t border-gray-200">
               <form onSubmit={sendMessage} className="flex items-end space-x-3">
                 <div className="flex-1">
                   <div className="flex items-center space-x-2 mb-2">
-                    <button
-                      type="button"
-                      className="p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
-                    >
+                    <button type="button" className="p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
                       <Paperclip className="h-4 w-4" />
                     </button>
-                    <MessageAttachments
-                      messageId=""
-                      attachments={[]}
-                      showUpload={true}
-                    />
-                    <button
-                      type="button"
-                      className="p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
-                    >
+                    <MessageAttachments messageId="" attachments={[]} showUpload={true} />
+                    <button type="button" className="p-2 text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
                       <Image className="h-4 w-4" />
                     </button>
                   </div>
-                  
+
                   <div className="relative">
                     <input
                       type="text"
@@ -648,15 +554,12 @@ const Messages: React.FC = () => {
                       className="w-full px-4 py-2 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500"
                       disabled={sendingMessage}
                     />
-                    <button
-                      type="button"
-                      className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
-                    >
+                    <button type="button" className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-gray-600 hover:bg-gray-100 rounded-full transition-colors">
                       <Smile className="h-4 w-4" />
                     </button>
                   </div>
                 </div>
-                
+
                 <button
                   type="submit"
                   disabled={!messageText.trim() || sendingMessage}
@@ -672,9 +575,7 @@ const Messages: React.FC = () => {
             <div className="text-center">
               <MessageCircle className="h-16 w-16 text-gray-300 mx-auto mb-4" />
               <h2 className="text-xl font-semibold text-gray-900 mb-2">Select a conversation</h2>
-              <p className="text-gray-600">
-                Choose a conversation from the sidebar to start messaging
-              </p>
+              <p className="text-gray-600">Choose a conversation from the sidebar to start messaging</p>
             </div>
           </div>
         )}
