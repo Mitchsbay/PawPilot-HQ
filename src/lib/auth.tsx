@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase, Profile } from './supabase';
-import { firstRow } from './firstRow';
+import type { User, Session } from '@supabase/supabase-js';
+import { supabase, type Profile } from './supabase';
 import { firstRow } from './firstRow';
 
 interface AuthContextType {
@@ -48,12 +47,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Listen for auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      
-      if (session?.user) {
-        loadProfile(session.user.id);
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session ?? null);
+      const nextUser = session?.user ?? null;
+      setUser(nextUser);
+      if (nextUser) {
+        loadProfile(nextUser.id);
       } else {
         setProfile(null);
         setLoading(false);
@@ -64,48 +63,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const loadProfile = async (userId: string) => {
+    setLoading(true);
     try {
-      let { data, error } = await supabase
+      // Use maybeSingle() so “no row” is not treated as an error/406
+      let { data: row, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
-        .limit(1);
+        .maybeSingle();
 
-      // If no profile found or 406 error, try to create one
-      const profile = firstRow(data);
-      if (!profile || error?.code === 'PGRST116' || error?.code === '406') {
-        try {
-          // Create profile directly instead of using RPC
-          const { data: user } = await supabase.auth.getUser();
-          if (user.data.user) {
-            const { data: newProfile, error: createError } = await supabase
-              .from('profiles')
-              .insert({
-                id: user.data.user.id,
-                email: user.data.user.email || '',
-                display_name: user.data.user.user_metadata?.display_name || user.data.user.email?.split('@')[0] || 'User'
-              })
-              .select()
-              .limit(1);
-          }
-          
+      if (error && error.code !== 'PGRST116') {
+        // Log non-trivial errors (PGRST116 == “Results contain 0 rows”)
+        console.error('Error loading profile:', error);
+      }
+
+      // If no profile exists, create one client-side (RLS allows insert where id = auth.uid())
+      if (!row) {
+        const { data: userRes } = await supabase.auth.getUser();
+        const u = userRes.user;
+        if (u) {
+          const { data: inserted, error: createError } = await supabase
+            .from('profiles')
+            .insert({
+              id: u.id,
+              email: u.email ?? '',
+              display_name:
+                (u.user_metadata as any)?.display_name ||
+                (u.email ? u.email.split('@')[0] : 'User'),
+            })
+            .select('*')
+            .maybeSingle();
+
           if (createError) {
             console.error('Error creating profile:', createError);
           } else {
-            data = newProfile;
+            row = inserted ?? null;
           }
-        } catch (createError) {
-          console.error('Error creating profile:', createError);
         }
-      } else if (error) {
-        console.error('Error loading profile:', error);
       }
-      
-      if (profile) {
-        setProfile(profile);
-      }
-    } catch (error) {
-      console.error('Error loading profile:', error);
+
+      setProfile(row ?? null);
+    } catch (e) {
+      console.error('Unexpected error loading profile:', e);
     } finally {
       setLoading(false);
     }
@@ -115,37 +114,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: {
-        data: {
-          display_name: displayName,
-        }
-      }
+      options: { data: { display_name: displayName } },
     });
-
     return { data, error };
   };
 
   const signIn = async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     return { data, error };
   };
 
   const signOut = async () => {
     const { error } = await supabase.auth.signOut();
-    if (error) {
-      console.error('Error signing out:', error);
-    }
+    if (error) console.error('Error signing out:', error);
   };
 
   const resetPassword = async (email: string) => {
     const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/auth/reset-password`,
     });
-
     return { data, error };
   };
 
@@ -156,20 +143,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .from('profiles')
       .update(updates)
       .eq('id', user.id)
-      .select()
-      .limit(1);
+      .select('*')
+      .maybeSingle();
 
-    if (!error) {
-      const updatedProfile = firstRow(data);
-      if (updatedProfile) {
-        setProfile(updatedProfile);
-      }
+    if (!error && data) {
+      setProfile(data);
     }
 
     return { data, error };
   };
 
-  const value = {
+  const value: AuthContextType = {
     user,
     profile,
     session,
@@ -181,9 +165,5 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     updateProfile,
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
