@@ -13,9 +13,9 @@ export async function getMyGroupRole(
     .eq('group_id', groupId)
     .eq('user_id', userId)
     .limit(1);
-  const row = firstRow(data);
-  const row = firstRow(data);
-  return { role: row?.role ?? null, error: null };
+    .maybeSingle();
+  if (error) return { role: null, error };
+  return { role: data?.role ?? null, error: null };
 }
 
 export async function isInThread(
@@ -29,9 +29,9 @@ export async function isInThread(
     .eq('thread_id', threadId)
     .eq('user_id', userId)
     .limit(1);
-  const row = firstRow(data);
-  const row = firstRow(data);
-  return { inThread: !!row, error: null };
+    .maybeSingle();
+  if (error) return { inThread: false, error };
+  return { inThread: !!data, error: null };
 }
 
 export async function getMyEventRSVP(
@@ -44,9 +44,9 @@ export async function getMyEventRSVP(
     .select('status')
     .eq('event_id', eventId)
     .eq('user_id', userId)
-    .limit(1);
-  const row = firstRow(data);
-  return { status: row?.status ?? null, error: null };
+    .maybeSingle();
+  if (error) return { status: null, error };
+  return { status: data?.status ?? null, error: null };
 }
 
 export async function isFollowing(
@@ -59,9 +59,9 @@ export async function isFollowing(
     .select('id')
     .eq('follower_id', followerId)
     .eq('following_id', followingId)
-    .limit(1);
-  const row = firstRow(data);
-  return { following: !!row, error: null };
+    .maybeSingle();
+  if (error) return { following: false, error };
+  return { following: !!data, error: null };
 }
 
 export async function hasLikedPost(
@@ -74,9 +74,9 @@ export async function hasLikedPost(
     .select('id')
     .eq('post_id', postId)
     .eq('user_id', userId)
-    .limit(1);
-  const row = firstRow(data);
-  return { liked: !!row, error: null };
+    .maybeSingle();
+  if (error) return { liked: false, error };
+  return { liked: !!data, error: null };
 }
 
 export async function hasSavedPost(
@@ -89,7 +89,7 @@ export async function hasSavedPost(
     .select('id')
     .eq('post_id', postId)
     .eq('user_id', userId)
-    .limit(1);
-  const row = firstRow(data);
-  return { saved: !!row, error: null };
+    .maybeSingle();
+  if (error) return { saved: false, error };
+  return { saved: !!data, error: null };
 }
