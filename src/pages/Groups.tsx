@@ -97,18 +97,28 @@ const Groups: React.FC = () => {
         // Check membership status for each group
         const groupsWithMembership = await Promise.all(
           (allGroupsData || []).map(async (group) => {
-            const { role, error: memberError } = await getMyGroupRole(supabase, group.id, profile.id);
+            try {
+              const { role, error: memberError } = await getMyGroupRole(supabase, group.id, profile.id);
             
-            if (memberError) {
-              console.error('Error checking group membership:', memberError);
-            }
+              if (memberError) {
+                console.error('Error checking group membership:', memberError);
+              }
 
-            return {
-              ...group,
-              creator_profile: group.profiles,
-              user_role: role,
-              user_is_member: role !== null
-            };
+              return {
+                ...group,
+                creator_profile: group.profiles,
+                user_role: role,
+                user_is_member: role !== null
+              };
+            } catch (error) {
+              console.error('Error processing group:', error);
+              return {
+                ...group,
+                creator_profile: group.profiles,
+                user_role: null,
+                user_is_member: false
+              };
+            }
           })
         );
 
